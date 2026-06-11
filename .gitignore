@@ -1,0 +1,16 @@
+# Python build artifacts / virtualenvs
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# macOS cruft
+.DS_Store

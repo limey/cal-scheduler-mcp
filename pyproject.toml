@@ -1,0 +1,46 @@
+[project]
+name = "cal-scheduler"
+version = "0.1.0"
+description = "A timezone-correct CalDAV scheduling MCP server (zoned .ics, validated recurrence, single-occurrence edits)."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Robert Clark" }
+]
+keywords = ["mcp", "caldav", "calendar", "scheduling", "ical", "icalendar", "timezone"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Scheduling",
+]
+# 3.11 = the floor we develop and test against.
+requires-python = ">=3.11"
+dependencies = [
+    "caldav>=3.2.1",
+    "icalendar>=7.1.2",
+    "mcp>=1.27.2",
+    "recurring-ical-events>=3.8.2",
+    "tzdata>=2026.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/limey/cal-scheduler-mcp"
+Repository = "https://github.com/limey/cal-scheduler-mcp"
+Issues = "https://github.com/limey/cal-scheduler-mcp/issues"
+
+[project.scripts]
+cal-scheduler = "cal_scheduler:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.15.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.11,<0.9.0"]
+build-backend = "uv_build"
