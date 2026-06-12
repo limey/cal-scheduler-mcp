@@ -9,7 +9,7 @@ so the same input yields the same bytes (handy if the .ics store is kept in git)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -74,20 +74,53 @@ def _nonpositive_interval(start_dt, end_dt) -> bool:
     )
 
 
+def _humanize_timedelta(td: timedelta) -> str:
+    """Render a `timedelta` as a human-readable English phrase.
+
+    Used by the self-teaching disclosure on `create_event`'s default
+    path (PHILOSOPHY §5). The message the agent sees is built from the
+    *actual* defaulted duration the .ics layer applied — never from a
+    hard-coded "1 hour" / "1 day" string — so the two cannot drift if
+    the default ever changes (issue #7).
+    """
+    total = int(td.total_seconds())
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes:
+        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if seconds:
+        parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+    return " ".join(parts) if parts else "0 seconds"
+
+
 def _end_default_message(start_value, end: str | None) -> str | None:
     """Self-teaching response helper (PHILOSOPHY §5).
 
-    When the agent calls `create_event` with only a `start` and no `end`,
-    the .ics layer applies a default duration (1h for timed, 1d for
-    all-day). The tool response should disclose that default so the
-    agent can learn from the call and remember for next time. Returns
-    `None` when `end` was given — no default to disclose.
+    When the agent calls `create_event` with only a `start` and no
+    `end`, the .ics layer applies a default duration (see
+    `ical.default_dtend` — the single source of truth for both the
+    persisted value and this disclosure). The tool response names that
+    duration so the agent can learn from the call and remember for
+    next time. Returns `None` when `end` was given — no default to
+    disclose. The message is built from the value the helper produced,
+    not from a hard-coded phrase, so the response and the persisted
+    value can never disagree (issue #7).
     """
     if end is not None:
         return None
-    if isinstance(start_value, datetime):
-        return "no `end` given; defaulted to 1 hour after `start`"
-    return "no `end` given; defaulted to 1 day after `start` (all-day)"
+    if start_value is None:
+        return None
+    defaulted_end = ical.default_dtend(start_value)
+    duration = defaulted_end - start_value
+    is_all_day = type(start_value) is not datetime
+    suffix = " (all-day)" if is_all_day else ""
+    return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
 
 
 # ── configuration advisor (PCD) ──────────────────────────────────────────────

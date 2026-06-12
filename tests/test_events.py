@@ -89,20 +89,75 @@ def test_move_occurrence_adds_recurrence_id_override():
 
 
 # ── create_event response (self-teaching default) ──────────────────────────
+#
+# The disclosure's *value* is derived from the live `ical.default_dtend` —
+# never a hard-coded phrase. If the default changes, the message changes
+# automatically; the test stays green without anyone touching the message
+# template. Issue #7.
 
 
-def test_end_default_message_one_hour_for_timed():
+def test_humanize_timedelta():
+    from cal_scheduler.server import _humanize_timedelta
+    assert _humanize_timedelta(timedelta(hours=1)) == "1 hour"
+    assert _humanize_timedelta(timedelta(hours=2)) == "2 hours"
+    assert _humanize_timedelta(timedelta(minutes=15)) == "15 minutes"
+    assert _humanize_timedelta(timedelta(days=1)) == "1 day"
+    assert _humanize_timedelta(timedelta(days=2)) == "2 days"
+    assert _humanize_timedelta(timedelta(days=1, hours=2)) == "1 day 2 hours"
+    assert _humanize_timedelta(timedelta(seconds=0)) == "0 seconds"
+
+
+def test_end_default_message_for_timed_names_live_default():
+    """The message must name the duration the live default produces —
+    derived from `ical.default_dtend`, not a hard-coded '1 hour' phrase."""
+    from cal_scheduler import ical
+    from cal_scheduler.server import _end_default_message, _humanize_timedelta
+
+    start = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    end = ical.default_dtend(start)
+    msg = _end_default_message(start, None)
+    assert _humanize_timedelta(end - start) in msg
+
+
+def test_end_default_message_for_all_day_names_live_default():
+    from cal_scheduler import ical
+    from cal_scheduler.server import _end_default_message, _humanize_timedelta
+
+    start = date(2026, 6, 30)
+    end = ical.default_dtend(start)
+    msg = _end_default_message(start, None)
+    assert _humanize_timedelta(end - start) in msg
+    assert "all-day" in msg
+
+
+def test_end_default_message_tracks_a_changed_default_for_timed(monkeypatch):
+    """Anti-drift: if `default_dtend` returns 15 minutes instead of 1 hour,
+    the message must say '15 minutes' automatically — proving the message
+    is built from the value, not from a hard-coded phrase.
+    """
+    from cal_scheduler import ical
     from cal_scheduler.server import _end_default_message
-    assert _end_default_message(
-        datetime(2026, 6, 30, 21, 0, tzinfo=NZ), None
-    ) == "no `end` given; defaulted to 1 hour after `start`"
 
-
-def test_end_default_message_one_day_for_all_day():
-    from cal_scheduler.server import _end_default_message
-    assert _end_default_message(date(2026, 6, 30), None) == (
-        "no `end` given; defaulted to 1 day after `start` (all-day)"
+    monkeypatch.setattr(
+        ical, "default_dtend",
+        lambda dt: dt + timedelta(minutes=15),
     )
+    msg = _end_default_message(datetime(2026, 6, 30, 21, 0, tzinfo=NZ), None)
+    assert "15 minutes" in msg
+    assert "1 hour" not in msg
+
+
+def test_end_default_message_tracks_a_changed_default_for_all_day(monkeypatch):
+    from cal_scheduler import ical
+    from cal_scheduler.server import _end_default_message
+
+    monkeypatch.setattr(
+        ical, "default_dtend",
+        lambda dt: dt + timedelta(days=2),
+    )
+    msg = _end_default_message(date(2026, 6, 30), None)
+    assert "2 days" in msg
+    assert "1 day" not in msg
 
 
 def test_end_default_message_none_when_end_given():
@@ -115,10 +170,12 @@ def test_end_default_message_none_when_end_given():
 def test_create_event_response_discloses_default_for_timed(monkeypatch):
     """Self-teaching response: when the agent omits `end`, the tool's
     response must include the default-end message so the agent can
-    learn from the call. Exercises the full path (helper + integration),
-    not just the helper."""
+    learn from the call. The message names the *live* default — the
+    same value the server applies — not a hard-coded phrase.
+    Exercises the full path (helper + integration), not just the helper."""
     from unittest.mock import MagicMock
-    from cal_scheduler import server
+    from cal_scheduler import ical, server
+    from cal_scheduler.server import _humanize_timedelta
 
     # _resolve_dt -> _zone -> _config reads the env. Set a placeholder;
     # we never actually connect (the Store is mocked).
@@ -132,4 +189,6 @@ def test_create_event_response_discloses_default_for_timed(monkeypatch):
     result = server.create_event(
         summary="test", start="2026-06-30T21:00", calendar="personal",
     )
-    assert "1 hour" in result["note"]
+    start = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    end = ical.default_dtend(start)
+    assert _humanize_timedelta(end - start) in result["note"]
