@@ -66,6 +66,28 @@ def new_uid() -> str:
     return f"{uuid.uuid4()}@cal-scheduler"
 
 
+# Single source of truth for the default end-time applied when the caller
+# omits `end`. Both `build_event` (which persists) and the tool layer (which
+# discloses the value in the response — PHILOSOPHY §5) go through this. If
+# the default ever changes, both the persisted value and the self-teaching
+# message move together. Issue #7.
+_DEFAULT_TIMED_DTEND = timedelta(hours=1)
+_DEFAULT_ALL_DAY_DTEND = timedelta(days=1)  # DTEND is exclusive for all-day
+
+
+def default_dtend(dtstart: datetime | date) -> datetime | date:
+    """The `dtend` `build_event` applies when the caller omits one.
+
+    Timed dtstart → dtstart + 1h. All-day dtstart (a `date`, not a
+    `datetime`) → dtstart + 1d. This is the value the .ics layer
+    persists; the tool-layer disclosure builds its self-teaching message
+    from this same value, so the two cannot drift.
+    """
+    if isinstance(dtstart, datetime):
+        return dtstart + _DEFAULT_TIMED_DTEND
+    return dtstart + _DEFAULT_ALL_DAY_DTEND
+
+
 # ── recurrence validation ─────────────────────────────────────────────────────
 
 
@@ -156,10 +178,7 @@ def build_event(
 ) -> Event:
     all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
     if dtend is None:
-        if all_day:
-            dtend = dtstart + timedelta(days=1)  # DTEND is exclusive for all-day
-        else:
-            dtend = dtstart + timedelta(hours=1)
+        dtend = default_dtend(dtstart)
     if not all_day and dtend <= dtstart:
         raise ValidationError("DTEND must be after DTSTART")
     if all_day and dtend <= dtstart:
