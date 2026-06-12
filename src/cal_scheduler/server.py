@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from mcp.server.fastmcp import FastMCP
 
 from . import ical
-from .config import Config
+from .config import Config, SCHEMA, validate_config
 from .store import Store
 from .timezones import Resolved, get_zone, resolve
 
@@ -72,6 +72,94 @@ def _nonpositive_interval(start_dt, end_dt) -> bool:
         and isinstance(end_dt, datetime)
         and end_dt <= start_dt
     )
+
+
+# ── configuration advisor (PCD) ──────────────────────────────────────────────
+
+
+@mcp.tool()
+def configure(config: dict | None = None) -> dict:
+    """Describe — or validate — the configuration the MCP needs.
+
+    PCD contract (see PHILOSOPHY.md): this tool is an *advisor*, not a
+    persister. It never writes to your harness, the environment, or
+    disk. Apply the values it returns through whatever your harness
+    uses for MCP server config (env vars, `config.yaml`, install
+    paths — every harness differs), restart the MCP per your
+    harness's rules, and retry the original call to validate.
+
+    Two modes:
+    - Call `configure()` with no argument to get the full schema:
+      required vs. optional fields, defaults, formats, and a worked
+      example. The agent uses this to know what to ask the user for.
+    - Call `configure(config={...})` with a candidate dict (the
+      values the agent intends to set) to validate. The response
+      lists missing or invalid fields, and on success returns the
+      resolved configuration (defaults filled in). The agent uses
+      this to close the loop in-conversation.
+    """
+    if config is None:
+        return {
+            "fields": [
+                {
+                    "name": f.name,
+                    "required": f.required,
+                    "default": f.default,
+                    "description": f.description,
+                    "example": f.example,
+                }
+                for f in SCHEMA
+            ],
+            "example": {
+                "CALDAV_BASE_URL": "http://127.0.0.1:5232",
+                "CALDAV_USERNAME": "alice",
+                "CALDAV_PASSWORD": "<your password>",
+                "CAL_DEFAULT_TZ": "Pacific/Auckland",
+            },
+            "how_to_apply": (
+                "Set these in your harness's per-server `env` block for "
+                "cal-scheduler (e.g. `mcp_servers.cal-scheduler.env` in "
+                "config.yaml), then restart the MCP per your harness's "
+                "rules. The MCP does not read the ambient shell — it "
+                "only sees the env you pass to it."
+            ),
+            "note": (
+                "configure is an advisor — it does not persist anything. "
+                "Your harness owns how the values are applied."
+            ),
+        }
+
+    missing, invalid = validate_config(config)
+    if missing or invalid:
+        total = len(missing) + len(invalid)
+        plural = "" if total == 1 else "s"
+        return {
+            "valid": False,
+            "missing": missing,
+            "invalid": [{"field": name, "reason": reason} for name, reason in invalid],
+            "note": (
+                f"Configuration has {len(missing)} missing and "
+                f"{len(invalid)} invalid field{plural}. "
+                "Fix the listed fields and call `configure(config=...)` again."
+            ),
+        }
+
+    resolved: dict[str, str | None] = {}
+    for f in SCHEMA:
+        v = config.get(f.name)
+        if isinstance(v, str) and v.strip():
+            resolved[f.name] = v.strip()
+        else:
+            resolved[f.name] = f.default
+    return {
+        "valid": True,
+        "resolved": resolved,
+        "note": (
+            "Configuration looks good. Apply it via your harness's "
+            "per-server `env` block, restart the MCP, then retry the "
+            "original call."
+        ),
+    }
 
 
 # ── calendars ─────────────────────────────────────────────────────────────────
