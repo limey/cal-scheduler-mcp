@@ -356,7 +356,21 @@ def dropped_on_reanchor(
     return max(count, 0)
 
 
-def occurrence_dict(occ: Event) -> dict:
+def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
+    """Serialise one expanded occurrence into the agent-facing dict.
+
+    `recurring` is the single-source-of-truth for the `recurring` flag — the
+    caller derives it from the *source* calendar's master VEVENT (it has
+    `RRULE` iff the source is a series) and passes it in.
+
+    Do NOT derive `recurring` from the occurrence itself: `recurring_ical_events`
+    adds a `RECURRENCE-ID` to *every* expansion, including one-off events
+    (where the library pins the RECURRENCE-ID to the same time as DTSTART,
+    which is semantically meaningless). The earlier `if "rrule" in occ or
+    "recurrence-id" in occ` check therefore leaked `"recurring": true` onto
+    one-off events and broke the agent's single- vs series-edit decision.
+    See eval 20260612-232740 §5 / issue #8.
+    """
     start = occ.start
     end = occ.end
     all_day = isinstance(start, date) and not isinstance(start, datetime)
@@ -371,6 +385,6 @@ def occurrence_dict(occ: Event) -> dict:
         out["location"] = str(occ["location"])
     if "description" in occ:
         out["description"] = str(occ["description"])
-    if "rrule" in occ or "recurrence-id" in occ:
+    if recurring:
         out["recurring"] = True
     return out

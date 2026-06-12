@@ -257,8 +257,15 @@ def list_events(start: str, end: str, calendar: str | None = None) -> dict:
     occs = []
     for raw in _store().search_raw(cal_name, lo_dt, hi_dt):
         cal = ical.parse(raw)
+        # Derive `recurring` from the *source* master VEVENT, not the
+        # expanded occurrence. `recurring_ical_events` adds a RECURRENCE-ID
+        # to every expansion (including one-off events) — see
+        # ical.occurrence_dict's docstring / issue #8. The master is the
+        # VEVENT without a RECURRENCE-ID; it has RRULE iff the source is
+        # a series.
+        is_recurring = "RRULE" in ical.master(cal)
         for occ in recurring_ical_events.of(cal).between(lo_dt, hi_dt):
-            occs.append(ical.occurrence_dict(occ))
+            occs.append(ical.occurrence_dict(occ, recurring=is_recurring))
     occs.sort(key=lambda e: e["start"])
     return {"calendar": cal_name, "count": len(occs), "events": occs}
 

@@ -192,3 +192,120 @@ def test_create_event_response_discloses_default_for_timed(monkeypatch):
     start = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
     end = ical.default_dtend(start)
     assert _humanize_timedelta(end - start) in result["note"]
+
+
+# ── `recurring` flag honesty (regression for eval §5 / issue #8) ───────────
+#
+# `list_events` previously returned `"recurring": true` for one-off events
+# because `occurrence_dict` derived the flag from the *expanded occurrence*
+# and the `recurring_ical_events` library adds a `RECURRENCE-ID` to every
+# expansion, including one-offs. The flag is the contract an agent uses to
+# decide single- vs series-edits; a wrong value silently breaks the edit
+# path. Regression: a one-off must come back with no `recurring` key, a
+# series must come back with `"recurring": true`.
+
+def test_occurrence_dict_default_is_not_recurring():
+    """Default keyword flag is False: helper does NOT emit `recurring`."""
+    ev = ical.build_event(
+        uid="u", summary="s",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=datetime(2026, 6, 30, 22, 0, tzinfo=NZ), now=NOW,
+    )
+    out = ical.occurrence_dict(ev)
+    assert "recurring" not in out
+
+
+def test_occurrence_dict_recurring_true_when_flag_set():
+    ev = ical.build_event(
+        uid="u", summary="s",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=datetime(2026, 6, 30, 22, 0, tzinfo=NZ), now=NOW,
+    )
+    out = ical.occurrence_dict(ev, recurring=True)
+    assert out["recurring"] is True
+
+
+def test_occurrence_dict_recurring_false_when_flag_false():
+    ev = ical.build_event(
+        uid="u", summary="s",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=datetime(2026, 6, 30, 22, 0, tzinfo=NZ), now=NOW,
+    )
+    out = ical.occurrence_dict(ev, recurring=False)
+    assert "recurring" not in out
+
+
+def test_list_events_one_off_is_not_recurring(monkeypatch):
+    """End-to-end: a one-off stored and listed comes back without a
+    `recurring` key, even though `recurring_ical_events` stamps a
+    RECURRENCE-ID on every expansion. This is the eval §5 bug."""
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    # Avoid touching the live CalDAV server / reading real env. The store
+    # is fully mocked; we still need CALDAV_BASE_URL to satisfy the
+    # `_config()` required-fields check, and CAL_DEFAULT_TZ for `_zone()`.
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 7, 15, 10, 0, tzinfo=NZ)
+    ev = ical.build_event(
+        uid="dentist@cal-scheduler", summary="Dentist",
+        dtstart=dtstart, dtend=dtstart + timedelta(hours=1), now=NOW,
+    )
+    cal = ical.event_calendar(ev)
+    raw = ical.serialize(cal)
+
+    fake_store = MagicMock()
+    fake_store.search_raw.return_value = [raw]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.list_events(
+        start="2026-07-01T00:00",
+        end="2026-07-31T00:00",
+        calendar="personal",
+    )
+
+    assert out["count"] == 1
+    event = out["events"][0]
+    assert event["uid"] == "dentist@cal-scheduler"
+    assert event.get("recurring", False) is False, (
+        f"one-off came back recurring=True — issue #8 regression: {event!r}"
+    )
+
+
+def test_list_events_recurring_series_is_recurring(monkeypatch):
+    """End-to-end: a series comes back with `recurring=True`."""
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 7, 1, 9, 0, tzinfo=NZ)
+    recur = ical.validate_and_normalize_rrule(
+        ical.parse_rrule("FREQ=WEEKLY;COUNT=4"), dtstart, NZ,
+    )
+    ev = ical.build_event(
+        uid="standup@cal-scheduler", summary="Standup",
+        dtstart=dtstart, dtend=dtstart + timedelta(minutes=30), now=NOW,
+        recur=recur,
+    )
+    cal = ical.event_calendar(ev)
+    raw = ical.serialize(cal)
+
+    fake_store = MagicMock()
+    fake_store.search_raw.return_value = [raw]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.list_events(
+        start="2026-07-01T00:00",
+        end="2026-07-31T00:00",
+        calendar="personal",
+    )
+
+    assert out["count"] == 4
+    for event in out["events"]:
+        assert event.get("recurring") is True, (
+            f"series occurrence came back without recurring=True: {event!r}"
+        )
