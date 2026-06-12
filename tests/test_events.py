@@ -86,3 +86,50 @@ def test_move_occurrence_adds_recurrence_id_override():
     assert len(overrides) == 1
     # master + override share the UID
     assert {str(c["uid"]) for c in ical.vevents(cal)} == {"evt-1@cal-scheduler"}
+
+
+# ── create_event response (self-teaching default) ──────────────────────────
+
+
+def test_end_default_message_one_hour_for_timed():
+    from cal_scheduler.server import _end_default_message
+    assert _end_default_message(
+        datetime(2026, 6, 30, 21, 0, tzinfo=NZ), None
+    ) == "no `end` given; defaulted to 1 hour after `start`"
+
+
+def test_end_default_message_one_day_for_all_day():
+    from cal_scheduler.server import _end_default_message
+    assert _end_default_message(date(2026, 6, 30), None) == (
+        "no `end` given; defaulted to 1 day after `start` (all-day)"
+    )
+
+
+def test_end_default_message_none_when_end_given():
+    from cal_scheduler.server import _end_default_message
+    assert _end_default_message(
+        datetime(2026, 6, 30, 21, 0, tzinfo=NZ), "2026-06-30T22:00"
+    ) is None
+
+
+def test_create_event_response_discloses_default_for_timed(monkeypatch):
+    """Self-teaching response: when the agent omits `end`, the tool's
+    response must include the default-end message so the agent can
+    learn from the call. Exercises the full path (helper + integration),
+    not just the helper."""
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    # _resolve_dt -> _zone -> _config reads the env. Set a placeholder;
+    # we never actually connect (the Store is mocked).
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+
+    fake_store = MagicMock()
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    # `calendar="personal"` skips _pick_calendar's config-touching fallbacks.
+    result = server.create_event(
+        summary="test", start="2026-06-30T21:00", calendar="personal",
+    )
+    assert "1 hour" in result["note"]

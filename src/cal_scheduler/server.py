@@ -74,6 +74,22 @@ def _nonpositive_interval(start_dt, end_dt) -> bool:
     )
 
 
+def _end_default_message(start_value, end: str | None) -> str | None:
+    """Self-teaching response helper (PHILOSOPHY §5).
+
+    When the agent calls `create_event` with only a `start` and no `end`,
+    the .ics layer applies a default duration (1h for timed, 1d for
+    all-day). The tool response should disclose that default so the
+    agent can learn from the call and remember for next time. Returns
+    `None` when `end` was given — no default to disclose.
+    """
+    if end is not None:
+        return None
+    if isinstance(start_value, datetime):
+        return "no `end` given; defaulted to 1 hour after `start`"
+    return "no `end` given; defaulted to 1 day after `start` (all-day)"
+
+
 # ── configuration advisor (PCD) ──────────────────────────────────────────────
 
 
@@ -255,6 +271,8 @@ def create_event(
             raise ValueError("start and end must both be timed or both be all-day dates")
         if _nonpositive_interval(rs.value, dtend):
             raise ValueError("`end` must be after `start` — omit `end` for a 1-hour default")
+    elif (default_msg := _end_default_message(rs.value, end)) is not None:
+        notes.append(default_msg)
 
     recur = None
     if rrule:
