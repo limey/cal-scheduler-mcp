@@ -46,19 +46,35 @@ Skip `cal-scheduler` and look elsewhere when:
 
 ## Install
 
-PyPI (after first public release — install from the pinned
-ref or local clone until then):
+The package is **not yet on PyPI.** Use the pre-release path
+below. `uv tool install cal-scheduler` and `pip install
+cal-scheduler` will work once it ships; the `uv add` warning
+below stays valid either way.
+
+Pre-release (the repo is private — `gh repo clone` needs your
+GitHub auth):
+
+```bash
+gh repo clone limey/cal-scheduler-mcp
+uv tool install /path/to/cal-scheduler-mcp
+# or, with SSH GitHub access, in one step:
+uv tool install git+ssh://git@github.com/limey/cal-scheduler-mcp
+```
+
+> **`uv add` is the wrong tool here.** `uv add cal-scheduler`
+> writes the dependency into the *current directory's*
+> `pyproject.toml` — for an MCP server (a spawned subprocess,
+> not an embedded library) that mutates whichever project the
+> agent is sitting in, not the MCP install. Use the isolated
+> `uv tool install` above. Reserve `uv add` for embedding
+> `cal_scheduler` as a library.
+
+Post-release:
 
 ```bash
 uv tool install cal-scheduler
 # or
 pip install cal-scheduler
-```
-
-Project-local (with `uv`):
-
-```bash
-uv add cal-scheduler
 ```
 
 The `cal-scheduler` console script and the `cal_scheduler`
