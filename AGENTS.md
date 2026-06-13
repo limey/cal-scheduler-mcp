@@ -65,23 +65,50 @@ The `cal-scheduler` console script and the `cal_scheduler`
 Python module are both installed. Pin to a specific version
 for reproducible installs.
 
+## Configuration
+
+The configuration field spec. **Single source of truth:**
+[`config.py`](src/cal_scheduler/config.py) `SCHEMA` tuple —
+the env loader, the `doctor` tool's `config` echo, and this
+section all read through it, so adding a field propagates
+everywhere.
+
+All settings come from the environment. Pass them through
+your harness's per-server `env` block (the MCP itself never
+persists anything; the harness is the persister). For the
+validation round-trip after wiring, see *Validate* below.
+
+| Field | Required? | Default | Example | What goes wrong if wrong |
+|---|---|---|---|---|
+| `CALDAV_BASE_URL` | yes | — | `http://127.0.0.1:5232` | every CalDAV-backed tool fails with a connection error; `doctor` reports `blockers` with a reachability hint |
+| `CALDAV_USERNAME` | no | (empty) | `alice` | auth fails against servers that require it; `doctor` reports `blockers` with an auth hint |
+| `CALDAV_PASSWORD` | no | (empty) | — *(secret — no worked example)* | same as `CALDAV_USERNAME`; also, if `CALDAV_USERNAME` is set without `CALDAV_PASSWORD` (or vice versa), Radicale's `auth=none` mode rejects the request — set both or neither |
+| `CAL_DEFAULT_TZ` | no | `Pacific/Auckland` | `Pacific/Auckland` | events are stored in the wrong zone; naive datetimes are misinterpreted (assumed to be wall time in the configured zone) |
+| `CAL_DEFAULT_CALENDAR` | no | — | `personal` | tool calls that omit `calendar` fail when the account has more than one calendar |
+
 ## Configure
 
-The MCP starts with **zero configuration**. When you call a
-tool that needs settings, the tool returns an error that
-points you at the `configure` tool. Call `configure` — it is
-the domain expert and will tell you exactly which fields the
-MCP needs (`CALDAV_BASE_URL`, optional `CALDAV_USERNAME` /
-`CALDAV_PASSWORD`, `CAL_DEFAULT_TZ`, optional
-`CAL_DEFAULT_CALENDAR`), with formats and a worked example.
+The MCP starts with **zero configuration.** When a tool
+needs a setting the agent hasn't wired in, the call fails
+with a caller-actionable error that points at the field name
+and hints at the fix. The full field spec — names, defaults,
+required-ness, examples, and "what goes wrong if wrong" — is
+in the *Configuration* section above. The runtime check for
+"is the wiring actually good?" is the `doctor` tool.
 
-`configure` is an **advisor**, not a persister. It describes
-*what* the MCP needs; it does not write to your harness's
-config. Apply the returned values through whatever your
-harness uses for MCP server config (env vars, `config.yaml`,
-install paths — every harness differs), then restart the MCP
-per your harness's rules, then retry the original call to
-validate.
+The flow:
+
+1. Read the *Configuration* section to find the field(s) the
+   error named.
+2. Set the values through whatever your harness uses for MCP
+   server config (env vars, `config.yaml`, install paths —
+   every harness differs). The MCP does not write to your
+   harness's config; you do.
+3. Restart the MCP per your harness's rules.
+4. Call `doctor` to validate. On success it returns the
+   resolved config (password redacted) and the list of
+   calendars on the account. On failure it returns actionable
+   hints naming the field that's wrong.
 
 ## Validate
 
@@ -100,9 +127,9 @@ After install + configure + restart, a minimal round-trip:
 5. `delete_event` (or `delete_calendar`) on the throwaway —
    cleans up.
 
-If any step fails with a configuration error, call
-`configure` again — the response will tell you which field is
-missing or invalid.
+If any step fails with a configuration error, call `doctor`
+— the response lists which field is missing or invalid. For
+the field spec, see *Configuration* above.
 
 ## Deliberate reductions (read once, internalise)
 
@@ -126,20 +153,16 @@ wrong tool.
 
 ## Implementation status
 
-This file describes the **target** install loop. The
-implementation is delivered in pieces. As of the version you
-install, expect:
+This file describes the **target** install loop, and the
+implementation matches it as of the version you install:
 
 - `cal-scheduler` console script and `cal_scheduler` Python
   module: present.
-- The 10 core tools (3 calendar + 6 event + 1 datetime
-  helper): present.
-- The `configure` tool: tracked under Phase 3 (see the
-  project's issue tracker). If it is not yet registered when
-  you read this, the workaround is to read `PHILOSOPHY.md`'s
-  *Progressive Configuration Discovery* section and set the
-  listed env vars in your harness's per-server `env` block
-  directly.
+- The 11 core tools (3 calendar + 6 event + 1 datetime
+  helper + 1 `doctor` preflight): present.
+- The configuration field spec (this file's *Configuration*
+  section): present, kept in lockstep with `config.py`'s
+  `SCHEMA` tuple.
 
 ## Pointers
 
