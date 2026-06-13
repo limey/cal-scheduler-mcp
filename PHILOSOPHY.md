@@ -114,3 +114,8 @@ and validates by calling `doctor`.
 This is the same teach-the-agent move as §5, applied to setup: the MCP stays simple
 until it's actually used, and the agent learns what's needed by trying to help and
 hitting the guardrails.
+
+PCD describes what the *server* does — surfaces config needs gradually, as the
+agent explores — not what the *agent* must do. A careful agent is free to read the
+SCHEMA in `AGENTS.md` up front and pre-wire what it can predict; PCD is the
+fallback for everything it didn't anticipate, not the prescribed path.
