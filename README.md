@@ -41,15 +41,33 @@ spawns as a subprocess.
 
 ## Install
 
-Requires Python ≥ 3.11.
+Requires Python ≥ 3.11. The package is not yet on PyPI;
+install from a clone until the first release ships (the repo
+is private — `gh repo clone` needs your GitHub auth).
 
 ```bash
 # run straight from the repo with uv (no global install)
 uv run cal-scheduler
 
 # or install the console script into a tool environment
-uv tool install cal-scheduler        # once published to PyPI
+gh repo clone limey/cal-scheduler-mcp
+uv tool install /path/to/cal-scheduler-mcp
+# or, with SSH GitHub access, in one step:
+uv tool install git+ssh://git@github.com/limey/cal-scheduler-mcp
 ```
+
+Once the package is published:
+
+```bash
+uv tool install cal-scheduler
+# or
+pip install cal-scheduler
+```
+
+> Don't `uv add cal-scheduler` for the MCP — `uv add` writes
+> into whatever project you're sitting in, not into the tool
+> environment. For an MCP server (spawned as a subprocess),
+> `uv tool install` is the right shape.
 
 ## Configure
 
