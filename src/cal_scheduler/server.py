@@ -9,14 +9,16 @@ so the same input yields the same bytes (handy if the .ics store is kept in git)
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
+import caldav
 from mcp.server.fastmcp import FastMCP
 
 from . import ical
-from .config import Config, SCHEMA, validate_config
+from .config import Config, SCHEMA, ConfigError
 from .store import Store
 from .timezones import Resolved, get_zone, resolve
 
@@ -123,92 +125,218 @@ def _end_default_message(start_value, end: str | None) -> str | None:
     return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
 
 
-# ── configuration advisor (PCD) ──────────────────────────────────────────────
+# ── preflight (PCD runtime check) ───────────────────────────────────────────
+#
+# `doctor` is the runtime companion to AGENTS.md's *Configuration* spec.
+# The spec lives in the doc (so a scraping agent can self-teach without
+# invoking a tool); `doctor` is what the agent calls when something is
+# wrong or during the install-validate round-trip. It runs a live
+# preflight: URL reachability, auth-header send, principal discovery,
+# calendar enumeration, and a one-shot write round-trip in a throwaway
+# calendar. It never persists — apply fixes via the harness's per-server
+# `env` block, restart, call `doctor` again to re-validate.
+
+
+def _password_presence_hint(cfg: Config) -> str:
+    """The Radicale `auth=none` gotcha, surfaced as the first blocker hint.
+
+    Radicale under `auth=none` rejects a request when one credential is
+    set without the other (it interprets a half-set pair as a malformed
+    basic-auth header and returns 401 / AuthorizationError). The rule:
+    set both `CALDAV_USERNAME` and `CALDAV_PASSWORD` together, or set
+    neither. Anything else triggers this hint as the first thing the
+    agent sees on a failed `doctor` call.
+    """
+    has_user = bool(cfg.username)
+    has_pass = bool(cfg.password)
+    if has_user and not has_pass:
+        return (
+            "Radicale under `auth=none` requires CALDAV_USERNAME and "
+            "CALDAV_PASSWORD to be set together, or both left empty. "
+            "A username is set but no password — set CALDAV_PASSWORD, "
+            "or clear CALDAV_USERNAME for truly anonymous access."
+        )
+    if has_pass and not has_user:
+        return (
+            "Radicale under `auth=none` requires CALDAV_USERNAME and "
+            "CALDAV_PASSWORD to be set together, or both left empty. "
+            "A password is set but no username — set CALDAV_USERNAME, "
+            "or clear CALDAV_PASSWORD for truly anonymous access."
+        )
+    return ""
+
+
+def _display_name(cal: caldav.Calendar) -> str:
+    """Best-effort display name for a calendar (matches `Store._display_name`)."""
+    try:
+        return str(cal.get_display_name())
+    except Exception:
+        return str(cal.name)
+
+
+def _redacted_config(cfg: Config, calendars: list[str]) -> dict:
+    """Echo the *resolved* config in the `ready` response, password-redacted.
+
+    The field set is driven by `SCHEMA` so the test for "config echo
+    matches SCHEMA" stays true when fields are added. The password is
+    surfaced as `"<set>"` (truthy) or `None` (absent) — never the value.
+    """
+    echo: dict[str, object] = {}
+    for f in SCHEMA:
+        if f.name == "CALDAV_BASE_URL":
+            echo[f.name] = cfg.base_url
+        elif f.name == "CALDAV_USERNAME":
+            echo[f.name] = cfg.username or None
+        elif f.name == "CALDAV_PASSWORD":
+            # Never echo the password itself; the agent only needs to
+            # know "is it set" so it can ask the user if not.
+            echo[f.name] = "<set>" if cfg.password else None
+        elif f.name == "CAL_DEFAULT_TZ":
+            echo[f.name] = cfg.default_tz
+        elif f.name == "CAL_DEFAULT_CALENDAR":
+            echo[f.name] = cfg.default_calendar
+    echo["calendars"] = calendars
+    return echo
+
+
+def _doctor_preflight(cfg: Config) -> dict:
+    """Run the full preflight against `cfg`; return the doctor response dict.
+
+    Extracted from the tool wrapper so tests can drive it with a stub
+    config and a stubbed `caldav` layer (the cached `_store()` is not
+    used here — the preflight opens a fresh connection per call, which
+    is the right shape for a tool the agent invokes rarely).
+    """
+    # 1+2: URL reachability + auth-header send. `principal()` triggers
+    # the PROPFIND that carries the Authorization header, so a single
+    # call exercises both steps.
+    try:
+        client = caldav.DAVClient(
+            url=cfg.base_url,
+            username=cfg.username or None,
+            password=cfg.password or None,
+        )
+        principal = client.principal()
+    except caldav.lib.error.AuthorizationError:
+        hints: list[str] = []
+        pw_hint = _password_presence_hint(cfg)
+        if pw_hint:
+            hints.append(pw_hint)
+        hints.append(
+            f"auth failed against {cfg.base_url} — check CALDAV_USERNAME "
+            "and CALDAV_PASSWORD on the server"
+        )
+        return {
+            "status": "blockers",
+            "hints": hints,
+            "note": (
+                "doctor preflight could not authenticate; fix the listed "
+                "hints and call `doctor` again."
+            ),
+        }
+    except Exception as exc:  # network, DNS, TLS, refused, etc.
+        return {
+            "status": "blockers",
+            "hints": [f"could not reach {cfg.base_url}: {type(exc).__name__}: {exc}"],
+            "note": "doctor preflight could not reach the CalDAV server.",
+        }
+
+    # 3: calendar enumeration (already proved the principal is reachable).
+    try:
+        names = sorted(_display_name(c) for c in principal.calendars())
+    except Exception as exc:
+        return {
+            "status": "blockers",
+            "hints": [f"calendar enumeration failed: {type(exc).__name__}: {exc}"],
+            "note": "doctor preflight reached the server but failed to list calendars.",
+        }
+
+    # 4: one-shot write round-trip in a throwaway calendar. The name is
+    # timestamped so two doctor calls in the same second don't collide,
+    # and so any leftover from a previous failed run is easy to spot and
+    # clean up by hand.
+    throwaway = f"_doctor_{int(time.time() * 1000)}"
+    try:
+        principal.make_calendar(name=throwaway)
+    except Exception as exc:
+        return {
+            "status": "blockers",
+            "hints": [
+                f"write round-trip failed (could not create throwaway "
+                f"calendar {throwaway!r}): {type(exc).__name__}: {exc}"
+            ],
+            "note": (
+                "doctor preflight authenticated and enumerated calendars, "
+                "but the write path is blocked. The account is read-only "
+                "or quota-limited."
+            ),
+        }
+    try:
+        for c in principal.calendars():
+            if _display_name(c) == throwaway:
+                c.delete()
+                break
+    except Exception as exc:
+        # Cleanup failed — leave the throwaway; the preflight still
+        # passed every check the user cares about. Surface as a hint
+        # so the agent can clean up.
+        return {
+            "status": "ready",
+            "config": _redacted_config(cfg, names),
+            "note": (
+                f"preflight passed, but cleanup of the throwaway calendar "
+                f"{throwaway!r} failed ({type(exc).__name__}: {exc}); "
+                "you may want to delete it by hand"
+            ),
+        }
+
+    return {
+        "status": "ready",
+        "config": _redacted_config(cfg, names),
+        "note": (
+            "preflight passed; the MCP is wired and the CalDAV account "
+            "is usable. For the configuration field spec (names, "
+            "defaults, required-ness), read AGENTS.md *Configuration*."
+        ),
+    }
 
 
 @mcp.tool()
-def configure(config: dict | None = None) -> dict:
-    """Describe — or validate — the configuration the MCP needs.
+def doctor() -> dict:
+    """Preflight: check the MCP is wired and the CalDAV account is usable.
 
-    PCD contract (see PHILOSOPHY.md): this tool is an *advisor*, not a
-    persister. It never writes to your harness, the environment, or
-    disk. Apply the values it returns through whatever your harness
-    uses for MCP server config (env vars, `config.yaml`, install
-    paths — every harness differs), restart the MCP per your
-    harness's rules, and retry the original call to validate.
+    Runs a live round-trip in this order: URL reachability, auth-header
+    send, principal discovery, calendar enumeration, and a one-shot
+    write (create + delete a throwaway calendar so the write path is
+    genuinely exercised, not just auth-checked).
 
-    Two modes:
-    - Call `configure()` with no argument to get the full schema:
-      required vs. optional fields, defaults, formats, and a worked
-      example. The agent uses this to know what to ask the user for.
-    - Call `configure(config={...})` with a candidate dict (the
-      values the agent intends to set) to validate. The response
-      lists missing or invalid fields, and on success returns the
-      resolved configuration (defaults filled in). The agent uses
-      this to close the loop in-conversation.
+    On success returns `{status: "ready", config: {...}, note: "..."}`
+    where `config` is the resolved configuration (password redacted) plus
+    the list of calendars on the account.
+
+    On failure returns `{status: "blockers", hints: [...], note: "..."}`
+    with actionable hints. The first hint names the Radicale `auth=none`
+    password-presence rule when the configured credentials trip it; the
+    second is the generic auth-failure hint. Apply fixes via your
+    harness's per-server `env` block, restart the MCP, and call `doctor`
+    again to re-validate.
+
+    PCD contract: this tool runs a check, it does not persist. The
+    configuration field spec lives in AGENTS.md *Configuration* (read it
+    once, then use this tool to verify the live wiring).
     """
-    if config is None:
+    try:
+        cfg = Config.from_env()
+    except ConfigError as exc:
         return {
-            "fields": [
-                {
-                    "name": f.name,
-                    "required": f.required,
-                    "default": f.default,
-                    "description": f.description,
-                    "example": f.example,
-                }
-                for f in SCHEMA
-            ],
-            "example": {
-                "CALDAV_BASE_URL": "http://127.0.0.1:5232",
-                "CALDAV_USERNAME": "alice",
-                "CALDAV_PASSWORD": "<your password>",
-                "CAL_DEFAULT_TZ": "Pacific/Auckland",
-            },
-            "how_to_apply": (
-                "Set these in your harness's per-server `env` block for "
-                "cal-scheduler (e.g. `mcp_servers.cal-scheduler.env` in "
-                "config.yaml), then restart the MCP per your harness's "
-                "rules. The MCP does not read the ambient shell — it "
-                "only sees the env you pass to it."
-            ),
+            "status": "blockers",
+            "hints": [str(exc)],
             "note": (
-                "configure is an advisor — it does not persist anything. "
-                "Your harness owns how the values are applied."
+                "doctor preflight could not read the configuration; set "
+                "the required env vars and call `doctor` again."
             ),
         }
-
-    missing, invalid = validate_config(config)
-    if missing or invalid:
-        total = len(missing) + len(invalid)
-        plural = "" if total == 1 else "s"
-        return {
-            "valid": False,
-            "missing": missing,
-            "invalid": [{"field": name, "reason": reason} for name, reason in invalid],
-            "note": (
-                f"Configuration has {len(missing)} missing and "
-                f"{len(invalid)} invalid field{plural}. "
-                "Fix the listed fields and call `configure(config=...)` again."
-            ),
-        }
-
-    resolved: dict[str, str | None] = {}
-    for f in SCHEMA:
-        v = config.get(f.name)
-        if isinstance(v, str) and v.strip():
-            resolved[f.name] = v.strip()
-        else:
-            resolved[f.name] = f.default
-    return {
-        "valid": True,
-        "resolved": resolved,
-        "note": (
-            "Configuration looks good. Apply it via your harness's "
-            "per-server `env` block, restart the MCP, then retry the "
-            "original call."
-        ),
-    }
+    return _doctor_preflight(cfg)
 
 
 # ── calendars ─────────────────────────────────────────────────────────────────

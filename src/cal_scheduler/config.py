@@ -25,13 +25,13 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class ConfigField:
-    """One configurable setting — the shape the `configure` tool advertises.
+    """One configurable setting.
 
     `default` is the value used when the env var is absent. `None` means
     "no default — the field must be supplied (when required) or stays unset".
-    `example` is a non-secret illustrative value shown in the schema response;
-    pass `None` for secrets (passwords, tokens) so we never leak one by
-    accident if a future field is added without thinking.
+    `example` is a non-secret illustrative value used by tests and
+    documentation; pass `None` for secrets (passwords, tokens) so we never
+    leak one by accident if a future field is added without thinking.
     """
 
     name: str
@@ -41,8 +41,10 @@ class ConfigField:
     example: str | None
 
 
-# One source of truth for both the env loader (`Config.from_env`) and the
-# PCD advisor tool (`configure`). Adding a field here propagates everywhere.
+# One source of truth for the env loader (`Config.from_env`) and any
+# docs/tests that need to enumerate the configurable surface. Adding a
+# field here propagates everywhere — the loader reads it, and any
+# test that asserts the response field set against SCHEMA stays correct.
 SCHEMA: tuple[ConfigField, ...] = (
     ConfigField(
         name="CALDAV_BASE_URL",
@@ -92,8 +94,9 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        # Reads through SCHEMA so the env loader and the `configure` tool
-        # can never drift on field names, defaults, or required-ness.
+        # Reads through SCHEMA so the env loader and any consumer of the
+        # field list (tests, the doctor tool, future docs) can never
+        # drift on field names, defaults, or required-ness.
         values: dict[str, str] = {}
         for f in SCHEMA:
             env_default = f.default if f.default is not None else ""
@@ -101,7 +104,7 @@ class Config:
             if f.required and not raw:
                 raise ConfigError(
                     f"{f.name} is required (e.g. {f.example!r} — "
-                    "call `configure()` for the full schema)"
+                    "call `doctor` to validate the live wiring)"
                 )
             values[f.name] = raw
         return cls(
@@ -113,34 +116,3 @@ class Config:
             default_tz=values["CAL_DEFAULT_TZ"] or "Pacific/Auckland",
             default_calendar=(values["CAL_DEFAULT_CALENDAR"] or None),
         )
-
-
-def validate_config(config: dict) -> tuple[list[str], list[tuple[str, str]]]:
-    """Validate a candidate configuration dict against SCHEMA.
-
-    Returns (missing, invalid) where:
-      - missing:  required field names whose value is absent or blank
-      - invalid:  (field_name, reason) pairs for fields that are present but bad
-
-    PCD contract: this is pure — it does not read the environment, does not
-    mutate anything, does not contact the CalDAV server. The MCP never
-    persists configuration; it only describes and validates it.
-    """
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # local import: cold path
-
-    missing: list[str] = []
-    invalid: list[tuple[str, str]] = []
-    for f in SCHEMA:
-        v = config.get(f.name)
-        present = isinstance(v, str) and bool(v.strip())
-        if f.required and not present:
-            missing.append(f.name)
-            continue
-        if not present:
-            continue
-        if f.name == "CAL_DEFAULT_TZ":
-            try:
-                ZoneInfo(v.strip())
-            except (ZoneInfoNotFoundError, ValueError, OSError):
-                invalid.append((f.name, f"unknown IANA timezone {v.strip()!r}"))
-    return missing, invalid
