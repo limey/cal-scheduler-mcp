@@ -89,22 +89,25 @@ reject contradictory recurrence anchors) is a direct response to those failures.
 
 The configuration philosophy that follows from §1, §2, and §5.
 
+> Surface note: `AGENTS.md` *Configuration* is the spec for initial wiring; `doctor` is the runtime diagnostic. The MCP still never persists.
+
 Instead of requiring configuration upfront before the server is useful, the server
 **advertises its configuration requirements only when needed — through tool error
 responses.** A tool that needs settings fails with a caller-actionable error that
-**points to a dedicated `configure` tool.**
+**points to a dedicated `doctor` tool** (with the field spec itself in `AGENTS.md`
+*Configuration* — a doc, so a scraping agent can self-teach without invoking a tool).
 
-Crucially, **`configure` does not persist anything.** It is a *domain-expert advisor*:
+Crucially, **`doctor` does not persist anything.** It is a *domain-expert advisor*:
 it tells the using agent exactly **what configuration the MCP needs** — the fields,
 their formats, an example — and lets the agent's harness do what only it knows how to
 do: wire those settings in (environment variables, config files, install paths — every
 harness does this differently). The agent then restarts/reloads as its harness requires
-and validates by retrying a real call.
+and validates by calling `doctor`.
 
 - **Progressive** — requirements surface gradually as the agent explores what the
   server can do, driven by *actual tool failures*, not an upfront wall of config.
 - **Self-healing** — the agent always has a clear, in-conversation path to fix the
-  problem (via `configure`) without leaving the loop.
+  problem (via `doctor`) without leaving the loop.
 - **Harness-agnostic** — the MCP describes *what*; the harness owns *how*. We do not
   assume a persistence model, because we don't own the harness's.
 
