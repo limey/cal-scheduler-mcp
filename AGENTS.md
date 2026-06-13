@@ -106,6 +106,10 @@ validation round-trip after wiring, see *Validate* below.
 
 ## Configure
 
+There is no configure tool — by design the MCP never
+persists. `doctor` validates the live wiring; your harness
+owns persistence.
+
 The MCP starts with **zero configuration.** When a tool
 needs a setting the agent hasn't wired in, the call fails
 with a caller-actionable error that points at the field name
@@ -113,6 +117,16 @@ and hints at the fix. The full field spec — names, defaults,
 required-ness, examples, and "what goes wrong if wrong" — is
 in the *Configuration* section above. The runtime check for
 "is the wiring actually good?" is the `doctor` tool.
+
+**Reload semantics.** Whether a manual restart is required
+is harness-specific. Some harnesses (e.g. Claude Code)
+hot-load newly added servers, so a freshly wired-in
+server's tools can appear with no manual restart; others
+require an explicit reload or session restart per the
+harness's own rules. If unsure, call `doctor` right after
+wiring — a successful call confirms the server is live; an
+error response suggests the harness has not picked the new
+server up yet.
 
 The flow:
 
@@ -122,7 +136,8 @@ The flow:
    server config (env vars, `config.yaml`, install paths —
    every harness differs). The MCP does not write to your
    harness's config; you do.
-3. Restart the MCP per your harness's rules.
+3. Restart the MCP per your harness's rules — see *Reload
+   semantics* above.
 4. Call `doctor` to validate. On success it returns the
    resolved config (password redacted) and the list of
    calendars on the account. On failure it returns actionable
@@ -130,7 +145,7 @@ The flow:
 
 ## Validate
 
-After install + configure + restart, a minimal round-trip:
+After install + configure, a minimal round-trip:
 
 1. `list_calendars` — should return at least the calendars on
    the wired account.
