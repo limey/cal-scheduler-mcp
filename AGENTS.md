@@ -82,11 +82,17 @@ validation round-trip after wiring, see *Validate* below.
 |---|---|---|---|---|
 | `CALDAV_BASE_URL` | yes | — | `http://127.0.0.1:5232` | every CalDAV-backed tool fails with a connection error; `doctor` reports `blockers` with a reachability hint |
 | `CALDAV_USERNAME` | no | (empty) | `alice` | auth fails against servers that require it; `doctor` reports `blockers` with an auth hint |
-| `CALDAV_PASSWORD` | no | (empty) | — *(secret — no worked example)* | same as `CALDAV_USERNAME`; also, if `CALDAV_USERNAME` is set without `CALDAV_PASSWORD` (or vice versa), Radicale's `auth=none` mode rejects the request — set both or neither |
+| `CALDAV_PASSWORD` | no | (empty) | — *(secret — no worked example)* | same as `CALDAV_USERNAME`; also, an empty password means the caldav client sends no Basic auth header at all — some servers (Radicale `auth=none`) need one to route to `/<username>/`, so a non-empty placeholder is required even though its value is ignored (see callout below) |
 | `CAL_DEFAULT_TZ` | no | `Pacific/Auckland` | `Pacific/Auckland` | events are stored in the wrong zone; naive datetimes are misinterpreted (assumed to be wall time in the configured zone) |
 | `CAL_DEFAULT_CALENDAR` | no | — | `personal` | tool calls that omit `calendar` fail when the account has more than one calendar |
 
+> **Radicale `auth=none` (and other username-routed servers):** set a non-empty placeholder password (e.g. `x`). The caldav client only sends a Basic auth header when `CALDAV_PASSWORD` is set, and the username in that header is how the server routes to `/<username>/`. An empty password means no header is sent, and routing fails with what looks like an auth error.
+
 ## Configure
+
+There is no `configure` tool — by design the MCP never
+persists. `doctor` validates the live wiring; your harness
+owns persistence.
 
 The MCP starts with **zero configuration.** When a tool
 needs a setting the agent hasn't wired in, the call fails
@@ -96,6 +102,16 @@ required-ness, examples, and "what goes wrong if wrong" — is
 in the *Configuration* section above. The runtime check for
 "is the wiring actually good?" is the `doctor` tool.
 
+**Reload semantics.** Whether a manual restart is required
+is harness-specific. Some harnesses (e.g. Claude Code)
+hot-load newly added servers, so a freshly wired-in
+server's tools can appear without a manual restart; others
+require an explicit reload or session restart per the
+harness's own rules. If unsure, call `doctor` right after
+wiring — a successful call confirms the server is live; an
+error response suggests the harness has not picked the new
+server up yet.
+
 The flow:
 
 1. Read the *Configuration* section to find the field(s) the
@@ -104,7 +120,8 @@ The flow:
    server config (env vars, `config.yaml`, install paths —
    every harness differs). The MCP does not write to your
    harness's config; you do.
-3. Restart the MCP per your harness's rules.
+3. Restart the MCP per your harness's rules — see *Reload
+   semantics* above.
 4. Call `doctor` to validate. On success it returns the
    resolved config (password redacted) and the list of
    calendars on the account. On failure it returns actionable
