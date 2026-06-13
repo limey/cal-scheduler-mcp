@@ -64,7 +64,12 @@ SCHEMA: tuple[ConfigField, ...] = (
         name="CALDAV_PASSWORD",
         required=False,
         default="",
-        description="CalDAV account password.",
+        description=(
+            "CalDAV account password. Some servers require a non-empty "
+            "placeholder (the value is ignored, but a Basic auth header "
+            "is only sent when a password is set); leave unset only if the "
+            "server accepts fully anonymous access."
+        ),
         example=None,  # secret — never surface a worked example
     ),
     ConfigField(

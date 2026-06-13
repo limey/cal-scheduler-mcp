@@ -166,6 +166,26 @@ def _password_presence_hint(cfg: Config) -> str:
     return ""
 
 
+def _blank_password_hint(cfg: Config) -> str:
+    """A 401 may also mean the password was left unset.
+
+    Some servers (the value is ignored) require a non-empty password
+    so the client emits a Basic auth header at all. The eval hit this
+    with both `CALDAV_USERNAME` and `CALDAV_PASSWORD` blank — the half-set
+    hint above does not cover that case, so this is the second-pass
+    correlation: when the password is unset AND auth still failed, suggest
+    setting a placeholder.
+    """
+    if cfg.password:
+        return ""
+    return (
+        "CALDAV_PASSWORD is unset; some servers need a non-empty value "
+        "as a placeholder (the value is ignored, but it triggers the "
+        "Basic auth header). Set CALDAV_PASSWORD to any non-empty string "
+        "and call `doctor` again."
+    )
+
+
 def _display_name(cal: caldav.Calendar) -> str:
     """Best-effort display name for a calendar (matches `Store._display_name`)."""
     try:
@@ -222,6 +242,9 @@ def _doctor_preflight(cfg: Config) -> dict:
         pw_hint = _password_presence_hint(cfg)
         if pw_hint:
             hints.append(pw_hint)
+        bp_hint = _blank_password_hint(cfg)
+        if bp_hint:
+            hints.append(bp_hint)
         hints.append(
             f"auth failed against {cfg.base_url} — check CALDAV_USERNAME "
             "and CALDAV_PASSWORD on the server"
