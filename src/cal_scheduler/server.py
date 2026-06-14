@@ -446,9 +446,10 @@ def create_event(
 ) -> dict:
     """Create an event (single, or recurring if `rrule` is given).
 
-    `start`/`end` are ISO 8601. A bare local time is assumed to be wall time in the
-    calendar's zone; an offset-qualified time is honoured and stored in that zone.
-    With no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
+    `start`/`end` are ISO 8601. A bare local time is interpreted as wall time in
+    the calendar's configured zone (see `resolve_datetime` to confirm before
+    writing); an offset-qualified time is honoured and stored in that zone. With
+    no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
     `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12".
     """
     cal_name = _pick_calendar(calendar)
@@ -589,7 +590,9 @@ def delete_event(uid: str, calendar: str | None = None) -> dict:
 def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -> dict:
     """Drop a single occurrence of a recurring series (EXDATE).
 
-    `occurrence` is the start of the instance to remove, as listed by list_events.
+    `occurrence` is the instance's current start exactly as returned by
+    `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
+    Bare local times may not match.
     """
     cal_name = _pick_calendar(calendar)
     store = _store()
@@ -611,9 +614,11 @@ def move_occurrence(
 ) -> dict:
     """Reschedule a single occurrence of a series (RECURRENCE-ID override).
 
-    `occurrence` is the instance's current start; `new_start`/`new_end` are where
-    it moves to. Omit `new_end` to keep the occurrence's existing duration. The
-    rest of the series is unchanged.
+    `occurrence` is the instance's current start exactly as returned by
+    `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
+    Bare local times may not match. `new_start`/`new_end` are where it moves to.
+    Omit `new_end` to keep the occurrence's existing duration. The rest of the
+    series is unchanged.
     """
     cal_name = _pick_calendar(calendar)
     store = _store()
