@@ -86,11 +86,17 @@ host's per-server `env` block rather than relying on the ambient shell.
 
 ### Example MCP host config
 
+The MCP runs as a stdio subprocess that the host spawns. Many hosts strip
+inherited `PATH` from that subprocess, so wire the `uv run --directory`
+form rather than relying on the `cal-scheduler` shim being on the spawn
+host's `PATH`:
+
 ```json
 {
   "mcpServers": {
     "cal-scheduler": {
-      "command": "cal-scheduler",
+      "command": "uv",
+      "args": ["run", "--directory", "/abs/path/to/cal-scheduler-mcp", "cal-scheduler"],
       "env": {
         "CALDAV_BASE_URL": "http://127.0.0.1:5232",
         "CALDAV_USERNAME": "me",
@@ -101,6 +107,11 @@ host's per-server `env` block rather than relying on the ambient shell.
   }
 }
 ```
+
+`/abs/path/to/cal-scheduler-mcp` is the absolute path to a local clone of
+this repo (see *Install* above). For a post-release install, point the same
+argument at the package install directory — find it with
+`pip show cal-scheduler`.
 
 Pair it with any CalDAV server. A simple self-hosted option is
 [Radicale](https://radicale.org/) (plain `http://`, no TLS needed for local use).
