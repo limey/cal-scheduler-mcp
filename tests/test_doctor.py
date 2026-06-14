@@ -281,3 +281,160 @@ def test_mcp_registers_doctor_and_drops_configure():
     names = {t.name for t in tools}
     assert "doctor" in names
     assert "configure" not in names
+
+
+# ── PCD sequencing: doctor is the intended first call (eval rec 2) ──────────
+#
+# Eval rec 2: PCD as written rewards a less-capable agent. A *capable*
+# agent treats the strict fail-loud server as something to validate
+# out-of-band first — port-scanning, `curl PROPFIND`, `uv run python -c`
+# one-liners. The fix is to position `doctor` as the *first* call after
+# wiring, both in AGENTS.md (the doc) and in the tool's own description
+# and `note` (the runtime surface). Without this, a fresh agent never
+# enters the intended discovery loop, and the user perceives the agent
+# as flailing.
+#
+# These tests pin the runtime surface — the docstring and the
+# `blockers` `note` field on each failure path. AGENTS.md is the doc
+# surface; its diff is the verification (user reads the PR).
+
+
+def test_doctor_docstring_positions_it_as_first_call_after_wiring():
+    """The tool's own description must tell the agent to call
+    `doctor` *first* after wiring, before any port-scan,
+    `curl PROPFIND`, or username-probe. Without this, the agent
+    reaches for the shell first and never enters the discovery
+    loop the PCD contract was designed around.
+
+    Pinned phrases:
+    - opening sentence frames doctor as the first call;
+    - the docstring explicitly names the shell-first anti-patterns
+      (port-scan, `curl PROPFIND`, `uv run python -c`) so the agent
+      sees them and stops reaching for them.
+    """
+    from cal_scheduler.server import doctor
+
+    doc = (doctor.__doc__ or "").lower()
+    # The opening sentence frames doctor as the first call.
+    assert "first call" in doc
+    # The docstring names the shell-first anti-patterns the eval
+    # specifically called out, so the agent does not reach for them
+    # as a precondition.
+    assert "curl propfind" in doc
+    assert "port-scan" in doc
+    assert "uv run python -c" in doc
+
+
+def test_doctor_blockers_note_on_config_error_says_first_call(monkeypatch):
+    """ConfigError path (env missing/unparseable): the `note` field
+    tells the agent that `doctor` is the intended first call after
+    wiring. Pinned so the empty-config case — the most common
+    first-call — teaches the sequencing rule from the failure
+    itself, not only from AGENTS.md."""
+    from cal_scheduler.config import ConfigError
+    from cal_scheduler.server import doctor
+
+    def boom(cls):
+        raise ConfigError("CALDAV_BASE_URL is required")
+
+    monkeypatch.setattr(Config, "from_env", classmethod(boom))
+
+    result = doctor()
+    assert result["status"] == "blockers"
+    note = result["note"].lower()
+    assert "first call" in note
+    assert "wiring" in note
+
+
+def test_doctor_blockers_note_on_auth_failure_says_first_call(stub_caldav):
+    """AuthorizationError path: the `note` field reinforces the
+    sequencing rule. Pinned because the eval's specific failure
+    mode (a *capable* agent probing six username candidates before
+    calling the tool) is exactly the case this `note` is meant to
+    short-circuit on the next loop iteration."""
+    cfg = Config(
+        base_url="http://caldav.example",
+        username="alice",
+        password="hunter2",
+        default_tz="Pacific/Auckland",
+        default_calendar=None,
+    )
+    stub_caldav.principal.side_effect = caldav.lib.error.AuthorizationError(
+        "http://caldav.example", "test unauthorized",
+    )
+
+    result = _doctor_preflight(cfg)
+    assert result["status"] == "blockers"
+    note = result["note"].lower()
+    assert "first call" in note
+    assert "wiring" in note
+
+
+def test_doctor_blockers_note_on_unreachable_says_first_call(stub_caldav):
+    """Network/DNS/TLS error path: the `note` field reinforces
+    sequencing. Pinned because the eval also called out the
+    *port-scan* anti-pattern (curl-ing the URL before calling
+    `doctor`); the `note` is the second line of defence after the
+    docstring."""
+    cfg = Config(
+        base_url="http://caldav.example",
+        username="alice",
+        password="hunter2",
+        default_tz="Pacific/Auckland",
+        default_calendar=None,
+    )
+    stub_caldav.principal.side_effect = ConnectionError("nope")
+
+    result = _doctor_preflight(cfg)
+    assert result["status"] == "blockers"
+    note = result["note"].lower()
+    assert "first call" in note
+    assert "wiring" in note
+
+
+def test_doctor_blockers_note_on_calendar_enumeration_says_first_call(stub_caldav):
+    """Calendar enumeration failure path: the `note` field still
+    reinforces sequencing even when steps 1+2 (URL reachability +
+    auth) succeeded. The agent did the right first move; the
+    server is in a degraded state. Pinned for uniformity across
+    the five failure paths."""
+    cfg = Config(
+        base_url="http://caldav.example",
+        username="alice",
+        password="hunter2",
+        default_tz="Pacific/Auckland",
+        default_calendar=None,
+    )
+    principal = MagicMock()
+    principal.calendars.side_effect = RuntimeError("listing failed")
+    stub_caldav.principal.return_value = principal
+
+    result = _doctor_preflight(cfg)
+    assert result["status"] == "blockers"
+    note = result["note"].lower()
+    assert "first call" in note
+    assert "wiring" in note
+
+
+def test_doctor_blockers_note_on_write_round_trip_says_first_call(stub_caldav):
+    """Write round-trip failure path (account is read-only or
+    quota-limited): the `note` field still reinforces sequencing.
+    Pinned for uniformity across the five failure paths — the
+    teaching should be the same regardless of which step failed."""
+    cfg = Config(
+        base_url="http://caldav.example",
+        username="alice",
+        password="hunter2",
+        default_tz="Pacific/Auckland",
+        default_calendar=None,
+    )
+    principal = MagicMock()
+    principal.calendars.return_value = []
+    principal.make_calendar.side_effect = RuntimeError("write blocked")
+    stub_caldav.principal.return_value = principal
+
+    result = _doctor_preflight(cfg)
+    assert result["status"] == "blockers"
+    note = result["note"].lower()
+    assert "first call" in note
+    assert "wiring" in note

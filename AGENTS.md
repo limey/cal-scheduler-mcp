@@ -107,41 +107,63 @@ validation round-trip after wiring, see *Validate* below.
 ## Configure
 
 There is no configure tool — by design the MCP never
-persists. `doctor` validates the live wiring; your harness
-owns persistence.
+persists. `doctor` is the intended *first* call after
+writing the configuration: it is the discovery surface
+for "is the wiring actually good?" and will name any
+missing or unreachable field. Your harness owns
+persistence.
+
+**Do not port-scan, `curl PROPFIND` the server, or
+username-probe with `uv run python -c` one-liners before
+calling `doctor`.** `doctor` opens the same connection
+(and more) and reports the result in one round-trip,
+structured for the agent to act on. The shell is the
+slower path; the tool is the intended one.
 
 The MCP starts with **zero configuration.** When a tool
 needs a setting the agent hasn't wired in, the call fails
-with a caller-actionable error that points at the field name
-and hints at the fix. The full field spec — names, defaults,
-required-ness, examples, and "what goes wrong if wrong" — is
-in the *Configuration* section above. The runtime check for
-"is the wiring actually good?" is the `doctor` tool.
+with a caller-actionable error that points at the field
+name and hints at the fix. The full field spec — names,
+defaults, required-ness, examples, and "what goes wrong
+if wrong" — is in the *Configuration* section above. The
+runtime check for "is the wiring actually good?" is the
+`doctor` tool.
 
 **Reload semantics.** Whether a manual restart is required
 is harness-specific. Some harnesses (e.g. Claude Code)
 hot-load newly added servers, so a freshly wired-in
 server's tools can appear with no manual restart; others
 require an explicit reload or session restart per the
-harness's own rules. If unsure, call `doctor` right after
-wiring — a successful call confirms the server is live; an
-error response suggests the harness has not picked the new
-server up yet.
+harness's own rules. The first call to `doctor` after
+writing the config confirms both that the server is live
+and that the harness has picked the new env up — a
+`ready` status means you can stop restarting; a
+`blockers` response suggests either the harness has not
+yet picked the new env up, or a field is wrong.
 
 The flow:
 
-1. Read the *Configuration* section to find the field(s) the
-   error named.
-2. Set the values through whatever your harness uses for MCP
-   server config (env vars, `config.yaml`, install paths —
-   every harness differs). The MCP does not write to your
-   harness's config; you do.
-3. Restart the MCP per your harness's rules — see *Reload
-   semantics* above.
-4. Call `doctor` to validate. On success it returns the
-   resolved config (password redacted) and the list of
-   calendars on the account. On failure it returns actionable
-   hints naming the field that's wrong.
+1. Read the *Configuration* section to find the field
+   spec (names, defaults, required-ness).
+2. Wire your best-guess values through whatever your
+   harness uses for MCP server config (env vars,
+   `config.yaml`, install paths — every harness differs).
+   The MCP does not write to your harness's config; you
+   do. If the only available hints are "the server is at
+   `<host>:<port>`" and "the account is `<user>`", wire
+   those — `doctor` will name the gap if a field is
+   still wrong.
+3. **First call: `doctor`.** This is the discovery move.
+   On success it returns the resolved config (password
+   redacted) and the list of calendars on the account.
+   On failure it returns actionable hints naming the
+   field that is missing or unreachable. If your harness
+   needs a restart to pick up new env (see *Reload
+   semantics* above), restart before this call.
+4. Loop on the `doctor` response. Fix the named field,
+   restart if your harness requires it, and call `doctor`
+   again. The loop terminates when `doctor` returns
+   `status: ready`.
 
 ## Validate
 

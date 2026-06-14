@@ -253,15 +253,21 @@ def _doctor_preflight(cfg: Config) -> dict:
             "status": "blockers",
             "hints": hints,
             "note": (
-                "doctor preflight could not authenticate; fix the listed "
-                "hints and call `doctor` again."
+                "doctor is the intended first call after wiring; the "
+                "preflight could not authenticate. Fix the listed hints "
+                "and call `doctor` again."
             ),
         }
     except Exception as exc:  # network, DNS, TLS, refused, etc.
         return {
             "status": "blockers",
             "hints": [f"could not reach {cfg.base_url}: {type(exc).__name__}: {exc}"],
-            "note": "doctor preflight could not reach the CalDAV server.",
+            "note": (
+                "doctor is the intended first call after wiring; the "
+                "preflight could not reach the CalDAV server. Check "
+                "the URL and any network/firewall rules, then call "
+                "`doctor` again."
+            ),
         }
 
     # 3: calendar enumeration (already proved the principal is reachable).
@@ -271,7 +277,12 @@ def _doctor_preflight(cfg: Config) -> dict:
         return {
             "status": "blockers",
             "hints": [f"calendar enumeration failed: {type(exc).__name__}: {exc}"],
-            "note": "doctor preflight reached the server but failed to list calendars.",
+            "note": (
+                "doctor is the intended first call after wiring; the "
+                "preflight reached the server but failed to list "
+                "calendars. The account may be in a degraded state — "
+                "call `doctor` again or check the server logs."
+            ),
         }
 
     # 4: one-shot write round-trip in a throwaway calendar. The name is
@@ -289,9 +300,10 @@ def _doctor_preflight(cfg: Config) -> dict:
                 f"calendar {throwaway!r}): {type(exc).__name__}: {exc}"
             ],
             "note": (
-                "doctor preflight authenticated and enumerated calendars, "
-                "but the write path is blocked. The account is read-only "
-                "or quota-limited."
+                "doctor is the intended first call after wiring; the "
+                "preflight authenticated and enumerated calendars, "
+                "but the write path is blocked. The account is "
+                "read-only or quota-limited."
             ),
         }
     try:
@@ -326,7 +338,14 @@ def _doctor_preflight(cfg: Config) -> dict:
 
 @mcp.tool()
 def doctor() -> dict:
-    """Preflight: check the MCP is wired and the CalDAV account is usable.
+    """Preflight: the first call to make after writing the configuration.
+
+    This is the intended discovery surface for "is the wiring actually
+    good?" — call it *first* after wiring your env block, before any
+    port-scan, `curl PROPFIND` of the server, or username-probe via
+    `uv run python -c`. The tool runs the same checks (and more) and
+    reports the result structured for an agent to act on, so reaching
+    for the shell first is the slower path.
 
     Runs a live round-trip in this order: URL reachability, auth-header
     send, principal discovery, calendar enumeration, and a one-shot
@@ -341,12 +360,13 @@ def doctor() -> dict:
     with actionable hints. The first hint names the Radicale `auth=none`
     password-presence rule when the configured credentials trip it; the
     second is the generic auth-failure hint. Apply fixes via your
-    harness's per-server `env` block, restart the MCP, and call `doctor`
-    again to re-validate.
+    harness's per-server `env` block, restart the MCP if your harness
+    requires it (see AGENTS.md *Configure* for the reload-semantics
+    rule), and call `doctor` again to re-validate.
 
     PCD contract: this tool runs a check, it does not persist. The
-    configuration field spec lives in AGENTS.md *Configuration* (read it
-    once, then use this tool to verify the live wiring).
+    configuration field spec lives in AGENTS.md *Configuration*; this
+    tool is what the agent calls to verify the live wiring.
     """
     try:
         cfg = Config.from_env()
@@ -355,8 +375,9 @@ def doctor() -> dict:
             "status": "blockers",
             "hints": [str(exc)],
             "note": (
-                "doctor preflight could not read the configuration; set "
-                "the required env vars and call `doctor` again."
+                "doctor is the intended first call after wiring; the "
+                "configuration could not be read. Set the env vars "
+                "named in the hints and call `doctor` again."
             ),
         }
     return _doctor_preflight(cfg)
