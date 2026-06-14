@@ -86,8 +86,7 @@ for reproducible installs.
 The MCP runs as a **stdio subprocess** that an MCP host
 spawns. The host config lives outside the repo (per-harness),
 not in `pyproject.toml`. The `uv run --directory` JSON shape
-is MCP-standard — every host (Claude Code, Codex, OpenCode,
-etc.) takes it through its own config file.
+is MCP-standard.
 
 Use the robust form so the spawn environment does not need
 the `cal-scheduler` shim on `PATH` (MCP hosts often strip
@@ -169,16 +168,6 @@ required-ness, examples, and "what goes wrong if wrong" — is
 in the *Configuration* section above. The runtime check for
 "is the wiring actually good?" is the `doctor` tool.
 
-**Reload semantics.** Whether a manual restart is required
-is harness-specific. Some harnesses (e.g. Claude Code)
-hot-load newly added servers, so a freshly wired-in
-server's tools can appear with no manual restart; others
-require an explicit reload or session restart per the
-harness's own rules. If unsure, call `doctor` right after
-wiring — a successful call confirms the server is live; an
-error response suggests the harness has not picked the new
-server up yet.
-
 The flow:
 
 1. Read the *Configuration* section to find the field(s) the
@@ -187,12 +176,10 @@ The flow:
    server config (env vars, `config.yaml`, install paths —
    every harness differs). The MCP does not write to your
    harness's config; you do.
-3. Restart the MCP per your harness's rules — see *Reload
-   semantics* above.
-4. Call `doctor` to validate. On success it returns the
-   resolved config (password redacted) and the list of
-   calendars on the account. On failure it returns actionable
-   hints naming the field that's wrong.
+3. Start or restart the MCP.
+4. Call `doctor` to verify. On success it returns the
+   resolved config and the list of calendars on the account.
+   On failure it returns actionable hints.
 
 ## Validate
 
