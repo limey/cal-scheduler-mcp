@@ -309,3 +309,215 @@ def test_list_events_recurring_series_is_recurring(monkeypatch):
         assert event.get("recurring") is True, (
             f"series occurrence came back without recurring=True: {event!r}"
         )
+
+
+# ── write tools require explicit `calendar` (issue #24) ─────────────────────
+#
+# Reads (list_events) keep their friendly fallbacks — `CAL_DEFAULT_CALENDAR`
+# and the single-calendar account case. Writes are stricter: guessing wrong
+# is the costly case (eval showed a vibe-classified "Work" call landing
+# on the wrong calendar with no friction; the only safety net was the
+# post-write `calendar` echo in the response). The agent must name the
+# target explicitly, or fail loudly before any `.ics` mutation.
+
+
+def test_require_calendar_returns_calendar_when_given(monkeypatch):
+    """_require_calendar is the strict counterpart of _pick_calendar:
+    when an explicit calendar is supplied, it returns it unchanged. The
+    store is never consulted on this path (no env / no CalDAV round-trip).
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+    from cal_scheduler.server import _require_calendar
+
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    assert _require_calendar("personal") == "personal"
+    fake_store.calendar_names.assert_not_called()
+
+
+def test_require_calendar_raises_with_same_shape_as_pick_calendar(monkeypatch):
+    """The rejection message must mirror `_pick_calendar`'s shape
+    exactly — same prefix, same inline list of valid values — so a cold
+    agent that learned the read path's message recognises the write
+    path's message as the same contract.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+    from cal_scheduler.server import _require_calendar
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal", "Work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(
+        ValueError,
+        match=r"^no calendar given and no default; specify one of: Personal, Work$",
+    ):
+        _require_calendar(None)
+
+
+def test_require_calendar_rejects_empty_string(monkeypatch):
+    """Empty string is falsy in the check, treated the same as None —
+    the call site uses `if calendar:` to gate, and we want the same
+    surface behavior on both (the agent passes an empty arg either
+    way when it forgot to wire the field)."""
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+    from cal_scheduler.server import _require_calendar
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="no calendar given and no default"):
+        _require_calendar("")
+
+
+def test_require_calendar_does_not_silently_fall_back_to_single_calendar(monkeypatch):
+    """On a single-calendar account, `_pick_calendar` (the read helper)
+    silently returns that one calendar. `_require_calendar` does not —
+    even a single-calendar account must name the target on a write.
+    This is the eval's safety case: an account with one calendar
+    'Personal' should not accept a 'Work'-vibe-classified write."""
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+    from cal_scheduler.server import _require_calendar
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(
+        ValueError, match="no calendar given and no default; specify one of: Personal"
+    ):
+        _require_calendar(None)
+
+
+def test_require_calendar_does_not_consult_cal_default_calendar(monkeypatch):
+    """The harness's `CAL_DEFAULT_CALENDAR` is a read-path convenience.
+    Writes don't see it: the agent must name the target explicitly.
+    Setting the env to a value that `_pick_calendar` would happily
+    consume must not change the write-path rejection.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+    from cal_scheduler.server import _require_calendar
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_CALENDAR", "Work")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal", "Work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(
+        ValueError, match="no calendar given and no default; specify one of: Personal, Work"
+    ):
+        _require_calendar(None)
+
+
+def test_create_event_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`create_event` with `calendar: None` raises the rejection AND
+    never reaches `_store().save_new_event(...)` — the `.ics` is not
+    mutated, no UID is generated. This is the eval's #1 invariant:
+    the rejection is pre-write, not post-write.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal", "Work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(
+        ValueError, match="no calendar given and no default; specify one of: Personal, Work"
+    ):
+        server.create_event(summary="1:1 with alice", start="2026-07-15T10:00")
+
+    # The store must not have been touched — no save, no fetch.
+    fake_store.save_new_event.assert_not_called()
+    fake_store.fetch_event.assert_not_called()
+    fake_store.calendar_names.assert_called_once()
+
+
+def test_move_occurrence_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`move_occurrence` with `calendar: None` raises the rejection
+    before `_store().fetch_event(...)` and before any `add_override`
+    call. Series state is untouched.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal", "Work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(
+        ValueError, match="no calendar given and no default; specify one of: Personal, Work"
+    ):
+        server.move_occurrence(
+            uid="standup@cal-scheduler",
+            occurrence="2026-07-08T09:00:00+12:00",
+            new_start="2026-07-08T10:00:00+12:00",
+        )
+
+    fake_store.fetch_event.assert_not_called()
+    fake_store.write_back.assert_not_called()
+
+
+def test_exclude_occurrence_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`exclude_occurrence` with `calendar: None` raises the rejection
+    before `_store().fetch_event(...)` and before any `add_exdate`
+    call. The series is unchanged.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal", "Work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(
+        ValueError, match="no calendar given and no default; specify one of: Personal, Work"
+    ):
+        server.exclude_occurrence(
+            uid="standup@cal-scheduler",
+            occurrence="2026-07-08T09:00:00+12:00",
+        )
+
+    fake_store.fetch_event.assert_not_called()
+    fake_store.write_back.assert_not_called()
+
+
+def test_list_events_still_uses_pick_calendar_with_friendly_fallbacks(monkeypatch):
+    """Reads keep their friendly fallbacks — the surface asymmetry is
+    intentional, not a regression. With `CAL_DEFAULT_CALENDAR` set
+    and no `calendar` arg, `list_events` must still resolve the
+    default and read successfully.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    # _config is lru_cache-d; clear it so the patched env is read fresh.
+    server._config.cache_clear()
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+    monkeypatch.setenv("CAL_DEFAULT_CALENDAR", "Work")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["Personal", "Work"]
+    fake_store.search_raw.return_value = []
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.list_events(start="2026-07-01T00:00", end="2026-07-31T00:00")
+    assert out["calendar"] == "Work"

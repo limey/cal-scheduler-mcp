@@ -45,7 +45,13 @@ def _now() -> datetime:
 
 
 def _pick_calendar(calendar: str | None) -> str:
-    """Resolve which calendar a call targets, with friendly fallbacks."""
+    """Resolve which calendar a call targets, with friendly fallbacks.
+
+    Read path: consults `CAL_DEFAULT_CALENDAR` and falls through to a
+    single-calendar account silently. Misreading is recoverable (the
+    agent can pick a different calendar and call again). Writes are
+    stricter — see `_require_calendar`.
+    """
     if calendar:
         return calendar
     cfg = _config()
@@ -54,6 +60,32 @@ def _pick_calendar(calendar: str | None) -> str:
     names = _store().calendar_names()
     if len(names) == 1:
         return names[0]
+    raise ValueError(
+        "no calendar given and no default; specify one of: "
+        + (", ".join(names) or "(none — create one first)")
+    )
+
+
+def _require_calendar(calendar: str | None) -> str:
+    """Write-path: always require an explicit `calendar` from the caller.
+
+    Mirrors `_pick_calendar`'s rejection shape exactly so the calling
+    agent gets the same actionable message on a write as on a read;
+    the only difference is the triggering condition. Writes never
+    silently fall back to `CAL_DEFAULT_CALENDAR` or to a single-calendar
+    account — guessing wrong on a write is the costly case (eval
+    surfaced a vibe-classified "Work" call landing on the wrong
+    calendar with no friction, the only safety net being the
+    post-write `calendar` echo in the response). The agent must name
+    the target explicitly, or fail loudly before any `.ics` mutation.
+
+    If a future PR adds a per-account default that the harness can
+    trust for writes, the rejection can be relaxed to `"no calendar
+    given"` without a schema change.
+    """
+    if calendar:
+        return calendar
+    names = _store().calendar_names()
     raise ValueError(
         "no calendar given and no default; specify one of: "
         + (", ".join(names) or "(none — create one first)")
@@ -450,8 +482,11 @@ def create_event(
     calendar's zone; an offset-qualified time is honoured and stored in that zone.
     With no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
     `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12".
+    `calendar` is required: omitting it raises `"no calendar given and no
+    default; specify one of: <names>"` (PHILOSOPHY §1, §5; the read path
+    has friendly fallbacks, writes don't).
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     rs = _resolve_dt(start)
     notes = [rs.note]
     dtend = None
@@ -590,8 +625,9 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
     """Drop a single occurrence of a recurring series (EXDATE).
 
     `occurrence` is the start of the instance to remove, as listed by list_events.
+    `calendar` is required — see `create_event` for the rationale.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
@@ -614,8 +650,9 @@ def move_occurrence(
     `occurrence` is the instance's current start; `new_start`/`new_end` are where
     it moves to. Omit `new_end` to keep the occurrence's existing duration. The
     rest of the series is unchanged.
+    `calendar` is required — see `create_event` for the rationale.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
