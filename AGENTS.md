@@ -81,6 +81,57 @@ The `cal-scheduler` console script and the `cal_scheduler`
 Python module are both installed. Pin to a specific version
 for reproducible installs.
 
+## Wire
+
+The MCP runs as a **stdio subprocess** that an MCP host
+spawns. The host config lives outside the repo (per-harness),
+not in `pyproject.toml`. The `uv run --directory` JSON shape
+is MCP-standard — every host (Claude Code, Codex, OpenCode,
+etc.) takes it through its own config file.
+
+Use the robust form so the spawn environment does not need
+the `cal-scheduler` shim on `PATH` (MCP hosts often strip
+inherited `PATH` from subprocesses):
+
+```json
+{
+  "mcpServers": {
+    "cal-scheduler": {
+      "command": "uv",
+      "args": ["run", "--directory", "/abs/path/to/cal-scheduler-mcp", "cal-scheduler"],
+      "env": {
+        "CALDAV_BASE_URL": "http://127.0.0.1:5232",
+        "CALDAV_USERNAME": "me",
+        "CALDAV_PASSWORD": "secret",
+        "CAL_DEFAULT_TZ": "Pacific/Auckland"
+      }
+    }
+  }
+}
+```
+
+> **PATH warning:** `"command": "cal-scheduler"` (without the
+> `uv run --directory` wrapper) assumes the console script is
+> on the spawning host's `PATH`, which MCP hosts often strip —
+> prefer the `uv run --directory` form unless you have
+> verified `PATH`.
+
+`/abs/path/to/cal-scheduler-mcp` is the absolute path to a
+local clone of this repo — the same place you ran `uv tool
+install` against in the *Install* section above. The `env`
+block names the required field plus the most commonly-set
+optionals; the full field spec (including
+`CAL_DEFAULT_CALENDAR`, which is omitted here) is in
+*Configuration* below. `CALDAV_PASSWORD` is a placeholder —
+see the *Configuration* callout for the `auth=none` case.
+
+**Current state (dev install, pre-PyPI)** is the wiring
+above. **Future state (PyPI):** once the package is
+published, the same form still works (point
+`/abs/path/to/cal-scheduler-mcp` at the install location —
+find it with `pip show cal-scheduler`); the field set stays
+as in *Configuration* below.
+
 ## Configuration
 
 The configuration field spec. **Single source of truth:**
