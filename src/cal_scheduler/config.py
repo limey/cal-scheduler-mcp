@@ -11,7 +11,6 @@ Settings:
 - CALDAV_USERNAME      (optional) CalDAV account user
 - CALDAV_PASSWORD      (optional) CalDAV account password
 - CAL_DEFAULT_TZ       (optional, default Pacific/Auckland) IANA zone for storage
-- CAL_DEFAULT_CALENDAR (optional) calendar used when a call omits one
 """
 from __future__ import annotations
 
@@ -79,13 +78,6 @@ SCHEMA: tuple[ConfigField, ...] = (
         description="IANA timezone every event is stored in; naive datetimes are assumed in this zone.",
         example="Pacific/Auckland",
     ),
-    ConfigField(
-        name="CAL_DEFAULT_CALENDAR",
-        required=False,
-        default=None,
-        description="Calendar used when a tool call omits `calendar`; if unset, the only calendar on the account is used.",
-        example="personal",
-    ),
 )
 
 
@@ -95,7 +87,6 @@ class Config:
     username: str
     password: str
     default_tz: str
-    default_calendar: str | None
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -119,5 +110,4 @@ class Config:
             # Empty string is treated as "use the project default" — the
             # legacy `from_env` did the same.
             default_tz=values["CAL_DEFAULT_TZ"] or "Pacific/Auckland",
-            default_calendar=(values["CAL_DEFAULT_CALENDAR"] or None),
         )

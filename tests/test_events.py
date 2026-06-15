@@ -185,7 +185,7 @@ def test_create_event_response_discloses_default_for_timed(monkeypatch):
     fake_store.save_new_event.return_value = None
     monkeypatch.setattr(server, "_store", lambda: fake_store)
 
-    # `calendar="personal"` skips _pick_calendar's config-touching fallbacks.
+    # `calendar="personal"` exercises the explicit path.
     result = server.create_event(
         summary="test", start="2026-06-30T21:00", calendar="personal",
     )
@@ -309,3 +309,66 @@ def test_list_events_recurring_series_is_recurring(monkeypatch):
         assert event.get("recurring") is True, (
             f"series occurrence came back without recurring=True: {event!r}"
         )
+
+
+# ── `calendar` parameter is required (PCD contract) ───────────────────────
+#
+# Every event tool's `calendar` is required; omitting it is a hard error
+# whose response names `list_calendars` (caller-actionable, points at
+# the discovery tool). The implicit-default-by-else-name heuristic is
+# gone — even a single-calendar account must be explicit.
+
+
+def test_calendar_omitted_raises_with_list_calendars_hint(monkeypatch):
+    """Omitting `calendar` on `create_event` raises a ValueError whose
+    message names `list_calendars` and lists the calendars on the
+    account — PCD-style, caller-actionable."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal", "work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.create_event(summary="x", start="2026-06-30T21:00")
+
+    # The discovery tool was actually called — the error's "available"
+    # list comes from a live enumeration, not a hard-coded name.
+    fake_store.calendar_names.assert_called_once()
+
+
+def test_calendar_required_even_with_single_calendar(monkeypatch):
+    """A single-calendar account still requires the call to be explicit:
+    the implicit-default-by-else-name heuristic is gone."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.create_event(summary="x", start="2026-06-30T21:00")
+
+
+def test_calendar_required_when_account_has_none(monkeypatch):
+    """Zero-calendar account: error names `list_calendars` and tells
+    the caller to create one first (no `available:` clause to lie about)."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = []
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError) as excinfo:
+        server.create_event(summary="x", start="2026-06-30T21:00")
+    assert "list_calendars" in str(excinfo.value)
+    assert "create one first" in str(excinfo.value)

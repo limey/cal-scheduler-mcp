@@ -80,14 +80,14 @@ def stub_caldav(monkeypatch):
 
 
 def test_doctor_ready_path_redacts_password_and_matches_schema(stub_caldav):
-    """Healthy account: status=ready, config echo carries every SCHEMA field,
-    and the password is surfaced as the literal "<set>" — never the value."""
+    """Healthy account: status=ready, config echo matches SCHEMA exactly
+    (plus the `calendars` enumeration), and the password is surfaced as
+    the literal "<set>" — never the value."""
     cfg = Config(
         base_url="http://caldav.example",
         username="alice",
         password="hunter2-secret",
         default_tz="Pacific/Auckland",
-        default_calendar="personal",
     )
     stub_caldav.principal.return_value = _stub_principal(
         calendars=[_stub_calendar("personal"), _stub_calendar("work")],
@@ -97,11 +97,11 @@ def test_doctor_ready_path_redacts_password_and_matches_schema(stub_caldav):
 
     assert result["status"] == "ready"
     config = result["config"]
-    # Every SCHEMA field name is present in the config echo (this is the
-    # "doctor's config echo matches SCHEMA" contract — survives additions).
-    assert {f.name for f in SCHEMA}.issubset(set(config.keys()))
-    # Plus the `calendars` enumeration the preflight discovered.
-    assert config["calendars"] == ["personal", "work"]
+    # Doctor's config echo matches SCHEMA exactly, plus the `calendars`
+    # enumeration the preflight discovered — no more, no less. A stray
+    # field here would be a PCD violation (a hidden config knob an
+    # agent can't discover through the spec).
+    assert set(config.keys()) == {f.name for f in SCHEMA} | {"calendars"}
     # Resolved values mirror the config the agent wired (the doctor echoes
     # the live config, not SCHEMA defaults — defaults only fill in
     # anything absent from the env).
@@ -109,7 +109,6 @@ def test_doctor_ready_path_redacts_password_and_matches_schema(stub_caldav):
     assert config["CALDAV_USERNAME"] == "alice"
     assert config["CALDAV_PASSWORD"] == "<set>"
     assert config["CAL_DEFAULT_TZ"] == "Pacific/Auckland"
-    assert config["CAL_DEFAULT_CALENDAR"] == "personal"
     # And the literal password never appears anywhere in the response.
     assert "hunter2-secret" not in repr(result)
 
@@ -130,7 +129,6 @@ def test_doctor_auth_failure_with_password_presence_rule_is_first_hint(stub_cald
         username="alice",
         password="",  # <-- the gotcha
         default_tz="Pacific/Auckland",
-        default_calendar=None,
     )
     stub_caldav.principal.side_effect = caldav.lib.error.AuthorizationError(
         "http://caldav.example", "test unauthorized",
@@ -162,7 +160,6 @@ def test_doctor_auth_failure_mirrors_password_only_half(stub_caldav):
         username="",
         password="hunter2",
         default_tz="Pacific/Auckland",
-        default_calendar=None,
     )
     stub_caldav.principal.side_effect = caldav.lib.error.AuthorizationError(
         "http://caldav.example", "test unauthorized",
@@ -185,7 +182,6 @@ def test_doctor_auth_failure_without_password_presence_rule(stub_caldav):
         username="alice",
         password="hunter2",
         default_tz="Pacific/Auckland",
-        default_calendar=None,
     )
     stub_caldav.principal.side_effect = caldav.lib.error.AuthorizationError(
         "http://caldav.example", "test unauthorized",
@@ -215,7 +211,6 @@ def test_password_presence_hint_pure_unit():
             username=username,
             password=password,
             default_tz="UTC",
-            default_calendar=None,
         )
 
     assert _password_presence_hint(cfg_with("", "")) == ""
@@ -281,3 +276,25 @@ def test_mcp_registers_doctor_and_drops_configure():
     names = {t.name for t in tools}
     assert "doctor" in names
     assert "configure" not in names
+
+
+def test_config_does_not_carry_implicit_calendar_member():
+    """The MCP has no notion of an implicit calendar fallback. A future
+    field that revives it would silently break the explicit-or-error
+    contract — pin its absence at the dataclass level."""
+    from dataclasses import fields
+
+    field_names = {f.name for f in fields(Config)}
+    # No member should be read by the tool layer as an implicit
+    # calendar default. Substring match keeps the test honest to the
+    # intent — "no calendar-related field in Config" — without naming
+    # a specific removed symbol.
+    assert not any("calendar" in n.lower() for n in field_names)
+
+
+def test_schema_does_not_carry_implicit_calendar_field():
+    """The env loader has no field that drives an implicit calendar
+    default. A stray entry would leak a PCD-hidden knob an agent
+    couldn't discover through the spec."""
+    names = {f.name.lower() for f in SCHEMA}
+    assert not any("calendar" in n for n in names)

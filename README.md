@@ -30,7 +30,7 @@ implementing a calendar engine:
 
 | Module | Role |
 |---|---|
-| `config.py` | environment config (`CALDAV_*`, `CAL_DEFAULT_TZ`, `CAL_DEFAULT_CALENDAR`) |
+| `config.py` | environment config (`CALDAV_*`, `CAL_DEFAULT_TZ`) |
 | `timezones.py` | parse datetimes; naive → assume default-zone wall time, offset → normalise into the zone; report what was assumed |
 | `ical.py` | build/parse VEVENTs (`icalendar`), expand ranges (`recurring-ical-events`), recurrence validation, EXDATE/RECURRENCE-ID ops |
 | `store.py` | CalDAV transport (`caldav`) — list/create/delete calendars, get/put/delete events, read-modify-write with etag |
@@ -79,7 +79,6 @@ All configuration is via environment variables:
 | `CALDAV_USERNAME` |  | — | CalDAV account user |
 | `CALDAV_PASSWORD` |  | — | CalDAV account password |
 | `CAL_DEFAULT_TZ` |  | `Pacific/Auckland` | IANA zone every event is stored in |
-| `CAL_DEFAULT_CALENDAR` |  | — | calendar used when a call omits one |
 
 Many MCP hosts strip inherited environment from stdio servers, so set these in the
 host's per-server `env` block rather than relying on the ambient shell.

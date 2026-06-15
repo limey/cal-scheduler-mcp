@@ -44,19 +44,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _pick_calendar(calendar: str | None) -> str:
-    """Resolve which calendar a call targets, with friendly fallbacks."""
+def _require_calendar(calendar: str | None) -> str:
+    """Return the calendar name; raise a PCD-style error if omitted."""
     if calendar:
         return calendar
-    cfg = _config()
-    if cfg.default_calendar:
-        return cfg.default_calendar
     names = _store().calendar_names()
-    if len(names) == 1:
-        return names[0]
     raise ValueError(
-        "no calendar given and no default; specify one of: "
-        + (", ".join(names) or "(none — create one first)")
+        "calendar is required; call `list_calendars` to discover the "
+        "calendars on this account (available: "
+        f"{', '.join(names) if names else '(none — create one first)'})"
     )
 
 
@@ -213,8 +209,6 @@ def _redacted_config(cfg: Config, calendars: list[str]) -> dict:
             echo[f.name] = "<set>" if cfg.password else None
         elif f.name == "CAL_DEFAULT_TZ":
             echo[f.name] = cfg.default_tz
-        elif f.name == "CAL_DEFAULT_CALENDAR":
-            echo[f.name] = cfg.default_calendar
     echo["calendars"] = calendars
     return echo
 
@@ -395,7 +389,7 @@ def list_events(start: str, end: str, calendar: str | None = None) -> dict:
     Dates are interpreted in the calendar's configured zone. Returns one entry per
     occurrence (recurring instances are expanded), sorted by start.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     zone = _zone()
     lo = _resolve_dt(start).value
     hi = _resolve_dt(end).value
@@ -452,7 +446,7 @@ def create_event(
     no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
     `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12".
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     rs = _resolve_dt(start)
     notes = [rs.note]
     dtend = None
@@ -503,7 +497,7 @@ def update_event(
     the whole series — occurrences before the new start stop being generated (this
     retimes an entire series; it does not split one at a date).
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
@@ -581,7 +575,7 @@ def _set(ev, key: str, value: str) -> None:
 @mcp.tool()
 def delete_event(uid: str, calendar: str | None = None) -> dict:
     """Delete a whole event/series (and any of its overrides). Irreversible."""
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     _store().delete_event(cal_name, uid)
     return {"ok": True, "deleted": uid, "calendar": cal_name}
 
@@ -594,7 +588,7 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
     Bare local times may not match.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
@@ -620,7 +614,7 @@ def move_occurrence(
     Omit `new_end` to keep the occurrence's existing duration. The rest of the
     series is unchanged.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
