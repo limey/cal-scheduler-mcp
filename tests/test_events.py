@@ -372,3 +372,216 @@ def test_calendar_required_when_account_has_none(monkeypatch):
         server.create_event(summary="x", start="2026-06-30T21:00")
     assert "list_calendars" in str(excinfo.value)
     assert "create one first" in str(excinfo.value)
+
+
+# ── series state echo on occurrence edits (post-edit integrity) ─────────────
+#
+# The response on `move_occurrence` / `exclude_occurrence` / `update_event`
+# carries a `series` object so the agent can assert series integrity from
+# the payload alone — no re-list needed. `create_event` with `rrule` echoes
+# `series.first_occurrence`. The counts are read from the live .ics state,
+# not from any pre-edit value.
+
+
+def _store_with_master_cal(master_cal):
+    from unittest.mock import MagicMock
+    fake_event = MagicMock()
+    fake_event.data = ical.serialize(master_cal)
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    def _write_back(event, ics):
+        event.data = ics
+    fake_store.write_back.side_effect = _write_back
+    return fake_store, fake_event
+
+
+def test_series_state_count_only():
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart, rrule="FREQ=WEEKLY;COUNT=12")
+    assert ical.series_state(cal, NZ) == {
+        "total_occurrences": 12, "overrides": 0, "exclusions": 0,
+    }
+
+
+def test_series_state_counts_reflect_live_exdate_and_override():
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart, rrule="FREQ=WEEKLY;COUNT=12")
+    ical.add_exdate(cal, dtstart + timedelta(weeks=1), NOW)
+    ical.add_override(
+        cal,
+        occurrence=dtstart + timedelta(weeks=2),
+        new_start=dtstart + timedelta(weeks=2, hours=2),
+        new_end=None, now=NOW,
+    )
+    assert ical.series_state(cal, NZ) == {
+        "total_occurrences": 12, "overrides": 1, "exclusions": 1,
+    }
+
+
+def test_series_state_non_recurring():
+    ev = ical.build_event(
+        uid="u", summary="s",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=datetime(2026, 6, 30, 22, 0, tzinfo=NZ), now=NOW,
+    )
+    assert ical.series_state(ical.event_calendar(ev), NZ) == {
+        "total_occurrences": 1, "overrides": 0, "exclusions": 0,
+    }
+
+
+def test_series_state_open_ended_returns_none_total():
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart, rrule="FREQ=WEEKLY")
+    state = ical.series_state(cal, NZ)
+    assert state["total_occurrences"] is None
+    assert state["overrides"] == 0
+    assert state["exclusions"] == 0
+
+
+def test_move_occurrence_response_echoes_series(monkeypatch):
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    fake_store, _ = _store_with_master_cal(_master(dtstart=dtstart, rrule="FREQ=WEEKLY;COUNT=12"))
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    occ = dtstart + timedelta(weeks=4)
+    out = server.move_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=occ.isoformat(),
+        new_start=(occ + timedelta(hours=1)).isoformat(),
+        calendar="personal",
+    )
+    assert out["ok"] is True
+    assert out["series"] == {"total_occurrences": 12, "overrides": 1, "exclusions": 0}
+
+
+def test_exclude_occurrence_response_echoes_series(monkeypatch):
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    fake_store, _ = _store_with_master_cal(_master(dtstart=dtstart, rrule="FREQ=WEEKLY;COUNT=12"))
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    occ = dtstart + timedelta(weeks=6)
+    out = server.exclude_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=occ.isoformat(),
+        calendar="personal",
+    )
+    assert out["ok"] is True
+    assert out["series"] == {"total_occurrences": 12, "overrides": 0, "exclusions": 1}
+
+
+def test_move_occurrence_counts_read_from_live_state(monkeypatch):
+    """Two moves in a row: the second call's response shows overrides=2,
+    proving the count is read from the live .ics post-write, not a cached value."""
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    fake_store, _ = _store_with_master_cal(_master(dtstart=dtstart, rrule="FREQ=WEEKLY;COUNT=12"))
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    occ1 = dtstart + timedelta(weeks=1)
+    out1 = server.move_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=occ1.isoformat(),
+        new_start=(occ1 + timedelta(hours=1)).isoformat(),
+        calendar="personal",
+    )
+    assert out1["series"]["overrides"] == 1
+
+    occ2 = dtstart + timedelta(weeks=2)
+    out2 = server.move_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=occ2.isoformat(),
+        new_start=(occ2 + timedelta(hours=1)).isoformat(),
+        calendar="personal",
+    )
+    assert out2["series"]["overrides"] == 2
+    assert out2["series"]["total_occurrences"] == 12
+    assert out2["series"]["exclusions"] == 0
+
+
+def test_create_event_with_rrule_echoes_first_occurrence(monkeypatch):
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    from unittest.mock import MagicMock
+    fake_store = MagicMock()
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.create_event(
+        summary="standup",
+        start="2026-06-30T21:00",
+        calendar="personal",
+        rrule="FREQ=WEEKLY;COUNT=12",
+    )
+    assert out["ok"] is True
+    assert out["series"]["first_occurrence"].startswith("2026-06-30T21:00")
+
+
+def test_create_event_without_rrule_omits_series_field(monkeypatch):
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    from unittest.mock import MagicMock
+    fake_store = MagicMock()
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.create_event(
+        summary="one-off", start="2026-06-30T21:00", calendar="personal",
+    )
+    assert "series" not in out
+
+
+def test_update_event_recurring_response_includes_series(monkeypatch):
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    fake_store, _ = _store_with_master_cal(_master(dtstart=dtstart, rrule="FREQ=WEEKLY;COUNT=12"))
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.update_event(
+        uid="evt-1@cal-scheduler", calendar="personal", summary="renamed",
+    )
+    assert out["ok"] is True
+    assert out["series"] == {"total_occurrences": 12, "overrides": 0, "exclusions": 0}
+
+
+def test_update_event_non_recurring_omits_series_field(monkeypatch):
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    ev = ical.build_event(
+        uid="one-off@cal-scheduler", summary="s",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=datetime(2026, 6, 30, 22, 0, tzinfo=NZ), now=NOW,
+    )
+    fake_store, _ = _store_with_master_cal(ical.event_calendar(ev))
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    out = server.update_event(
+        uid="one-off@cal-scheduler", calendar="personal", summary="renamed",
+    )
+    assert "series" not in out

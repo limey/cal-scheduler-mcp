@@ -388,3 +388,58 @@ def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
     if recurring:
         out["recurring"] = True
     return out
+
+
+# ── series state echo (post-edit integrity) ──────────────────────────────────
+
+
+def series_state(cal: Calendar, zone: ZoneInfo) -> dict:
+    """The post-edit state of a calendar, for the tool response payload.
+
+    `total_occurrences` is the planned count from the RRULE (int for COUNT,
+    or expansion over a finite UNTIL window; None for an open-ended series).
+    `overrides` is the count of single-instance RECURRENCE-ID components.
+    `exclusions` is the count of EXDATE values on the master. A non-recurring
+    event returns `{total_occurrences: 1, overrides: 0, exclusions: 0}`.
+    """
+    ev = master(cal)
+    if "RRULE" not in ev:
+        return {"total_occurrences": 1, "overrides": 0, "exclusions": 0}
+    return {
+        "total_occurrences": _series_total(ev, zone),
+        "overrides": sum(1 for c in vevents(cal) if "RECURRENCE-ID" in c),
+        "exclusions": _exdate_count(ev),
+    }
+
+
+def _series_total(ev: Event, zone: ZoneInfo) -> int | None:
+    """Planned occurrence count from the RRULE: COUNT, expanded UNTIL, or None."""
+    recur = ev["RRULE"]
+    if "COUNT" in recur:
+        count = recur["COUNT"]
+        return int(count[0]) if isinstance(count, (list, tuple)) else int(count)
+    if "UNTIL" in recur:
+        import recurring_ical_events
+        from copy import deepcopy
+
+        master_only = new_calendar()
+        master_only.add_component(deepcopy(ev))
+        u = recur["UNTIL"]
+        u = u[0] if isinstance(u, (list, tuple)) else u
+        if not isinstance(u, datetime):
+            u = datetime(u.year, u.month, u.day, 23, 59, 59, tzinfo=zone)
+        elif u.tzinfo is None:
+            u = u.replace(tzinfo=zone)
+        start = _as_dt(ev.decoded("dtstart"), zone)
+        return sum(1 for _ in recurring_ical_events.of(master_only).between(start, u))
+    return None
+
+
+def _exdate_count(ev: Event) -> int:
+    if "EXDATE" not in ev:
+        return 0
+    ex = ev["EXDATE"]
+    n = 0
+    for item in ex if isinstance(ex, (list, tuple)) else [ex]:
+        n += len(item.dts) if hasattr(item, "dts") else 1
+    return n

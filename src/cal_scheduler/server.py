@@ -207,7 +207,9 @@ def create_event(
     the calendar's configured zone (see `resolve_datetime` to confirm before
     writing); an offset-qualified time is honoured and stored in that zone. With
     no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
-    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12".
+    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12". When `rrule` is
+    given, the response includes `series.first_occurrence` so the agent can
+    confirm the anchor.
     """
     cal_name = _require_calendar(calendar)
     rs = _resolve_dt(start)
@@ -239,7 +241,10 @@ def create_event(
         recur=recur,
     )
     _store().save_new_event(cal_name, ical.serialize(ical.event_calendar(ev)))
-    return {"ok": True, "uid": uid, "calendar": cal_name, "note": "; ".join(notes)}
+    out: dict = {"ok": True, "uid": uid, "calendar": cal_name, "note": "; ".join(notes)}
+    if recur is not None:
+        out["series"] = {"first_occurrence": ev.decoded("dtstart").isoformat()}
+    return out
 
 
 @mcp.tool()
@@ -258,7 +263,10 @@ def update_event(
     Preserves the UID and any single-occurrence exclusions/overrides. If you move
     `start` without giving `end`, the duration is kept. Moving `start` re-anchors
     the whole series — occurrences before the new start stop being generated (this
-    retimes an entire series; it does not split one at a date).
+    retimes an entire series; it does not split one at a date). When the result
+    is a series (master has RRULE), the response includes `series` with
+    `total_occurrences`, `overrides`, and `exclusions` counts so the agent can
+    assert series integrity without re-listing.
     """
     cal_name = _require_calendar(calendar)
     store = _store()
@@ -326,7 +334,10 @@ def update_event(
 
     ical.touch(ev, _now())
     store.write_back(event, ical.serialize(cal))
-    return {"ok": True, "uid": uid, "calendar": cal_name, "note": "; ".join(notes)}
+    out: dict = {"ok": True, "uid": uid, "calendar": cal_name, "note": "; ".join(notes)}
+    if "RRULE" in ev:
+        out["series"] = ical.series_state(cal, zone)
+    return out
 
 
 def _set(ev, key: str, value: str) -> None:
@@ -349,7 +360,9 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
 
     `occurrence` is the instance's current start exactly as returned by
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
-    Bare local times may not match.
+    Bare local times may not match. The response includes `series` with
+    `total_occurrences`, `overrides`, and `exclusions` counts so the agent can
+    assert series integrity from the payload alone.
     """
     cal_name = _require_calendar(calendar)
     store = _store()
@@ -358,7 +371,10 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
     occ = _resolve_dt(occurrence).value
     ical.add_exdate(cal, occ, _now())
     store.write_back(event, ical.serialize(cal))
-    return {"ok": True, "uid": uid, "excluded": occ.isoformat()}
+    out: dict = {"ok": True, "uid": uid, "excluded": occ.isoformat()}
+    if "RRULE" in ical.master(cal):
+        out["series"] = ical.series_state(cal, _zone())
+    return out
 
 
 @mcp.tool()
@@ -375,7 +391,9 @@ def move_occurrence(
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
     Bare local times may not match. `new_start`/`new_end` are where it moves to.
     Omit `new_end` to keep the occurrence's existing duration. The rest of the
-    series is unchanged.
+    series is unchanged. The response includes `series` with
+    `total_occurrences`, `overrides`, and `exclusions` counts so the agent can
+    assert series integrity from the payload alone.
     """
     cal_name = _require_calendar(calendar)
     store = _store()
@@ -391,7 +409,10 @@ def move_occurrence(
         )
     ical.add_override(cal, occurrence=occ, new_start=ns.value, new_end=ne, now=_now())
     store.write_back(event, ical.serialize(cal))
-    return {"ok": True, "uid": uid, "moved_from": occ.isoformat(), "note": ns.note}
+    out: dict = {"ok": True, "uid": uid, "moved_from": occ.isoformat(), "note": ns.note}
+    if "RRULE" in ical.master(cal):
+        out["series"] = ical.series_state(cal, _zone())
+    return out
 
 
 def main() -> None:
