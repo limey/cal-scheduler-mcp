@@ -91,8 +91,8 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         # Reads through SCHEMA so the env loader and any consumer of the
-        # field list (tests, the doctor tool, future docs) can never
-        # drift on field names, defaults, or required-ness.
+        # field list (tests, future docs) can never drift on field
+        # names, defaults, or required-ness.
         values: dict[str, str] = {}
         for f in SCHEMA:
             env_default = f.default if f.default is not None else ""
@@ -100,7 +100,7 @@ class Config:
             if f.required and not raw:
                 raise ConfigError(
                     f"{f.name} is required (e.g. {f.example!r} — "
-                    "call `doctor` to validate the live wiring)"
+                    "see AGENTS.md *Configuration*)"
                 )
             values[f.name] = raw
         return cls(
