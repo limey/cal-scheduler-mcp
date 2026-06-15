@@ -99,25 +99,27 @@ short contract, silence where the code is clear.
 
 The configuration philosophy that follows from §1, §2, and §5.
 
-> Surface note: `AGENTS.md` *Configuration* is the spec for initial wiring; `doctor` is the runtime diagnostic. The MCP still never persists.
+> Surface note: `AGENTS.md` *Configuration* is the spec; tool responses are the live check. The MCP still never persists.
 
 Instead of requiring configuration upfront before the server is useful, the server
 **advertises its configuration requirements only when needed — through tool error
 responses.** A tool that needs settings fails with a caller-actionable error that
-**points to a dedicated `doctor` tool** (with the field spec itself in `AGENTS.md`
-*Configuration* — a doc, so a scraping agent can self-teach without invoking a tool).
+**names the field and points at the `AGENTS.md` *Configuration* section** (the doc
+section the scraping agent reads once and carries with it — no tool call needed
+to learn the contract).
 
-Crucially, **`doctor` does not persist anything.** It is a *domain-expert advisor*:
-it tells the using agent exactly **what configuration the MCP needs** — the fields,
-their formats, an example — and lets the agent's harness do what only it knows how to
-do: wire those settings in (environment variables, config files, install paths — every
-harness does this differently). The agent then restarts/reloads as its harness requires
-and validates by calling `doctor`.
+The MCP describes *what* configuration it needs and lets the agent's harness do
+what only it knows how to do: wire those settings in (environment variables,
+config files, install paths — every harness does this differently). The agent
+restarts/reloads as its harness requires and confirms with a normal tool call
+(e.g. `list_calendars`) — the first failed tool call, if anything is wrong, is
+the diagnostic.
 
 - **Progressive** — requirements surface gradually as the agent explores what the
   server can do, driven by *actual tool failures*, not an upfront wall of config.
 - **Self-healing** — the agent always has a clear, in-conversation path to fix the
-  problem (via `doctor`) without leaving the loop.
+  problem by reading the field-named error against the doc, without leaving the
+  loop.
 - **Harness-agnostic** — the MCP describes *what*; the harness owns *how*. We do not
   assume a persistence model, because we don't own the harness's.
 

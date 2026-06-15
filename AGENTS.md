@@ -134,9 +134,9 @@ as in *Configuration* below.
 
 The configuration field spec. **Single source of truth:**
 [`config.py`](src/cal_scheduler/config.py) `SCHEMA` tuple —
-the env loader, the `doctor` tool's `config` echo, and this
-section all read through it, so adding a field propagates
-everywhere.
+the env loader, this section, and the configuration
+diagnostic in tool error responses all read through it, so
+adding a field propagates everywhere.
 
 All settings come from the environment. Pass them through
 your harness's per-server `env` block (the MCP itself never
@@ -145,8 +145,8 @@ validation round-trip after wiring, see *Validate* below.
 
 | Field | Required? | Default | Example | What goes wrong if wrong |
 |---|---|---|---|---|
-| `CALDAV_BASE_URL` | yes | — | `http://127.0.0.1:5232` | every CalDAV-backed tool fails with a connection error; `doctor` reports `blockers` with a reachability hint |
-| `CALDAV_USERNAME` | no | (empty) | `alice` | auth fails against servers that require it; `doctor` reports `blockers` with an auth hint |
+| `CALDAV_BASE_URL` | yes | — | `http://127.0.0.1:5232` | every CalDAV-backed tool fails with a connection error naming `CALDAV_BASE_URL` |
+| `CALDAV_USERNAME` | no | (empty) | `alice` | auth fails against servers that require it; the tool error names `CALDAV_USERNAME` / `CALDAV_PASSWORD` |
 | `CALDAV_PASSWORD` | no | (empty) | — *(secret — no worked example)* | same as `CALDAV_USERNAME`; also, an empty password means the caldav client sends no Basic auth header at all — some servers (Radicale `auth=none`) need one to route to `/<username>/`, so a non-empty placeholder is required even though its value is ignored (see callout below) |
 | `CAL_DEFAULT_TZ` | no | `Pacific/Auckland` | `Pacific/Auckland` | events are stored in the wrong zone; naive datetimes are misinterpreted (assumed to be wall time in the configured zone) |
 
@@ -154,17 +154,18 @@ validation round-trip after wiring, see *Validate* below.
 
 ## Configure
 
-There is no configure tool — by design the MCP never
-persists. `doctor` validates the live wiring; your harness
-owns persistence.
+There is no `configure` tool and no preflight tool — by
+design the MCP never persists, and the doc is the advisor
+rather than a runtime check. Tool responses are the live
+check: when a setting is wrong, the failing tool surfaces a
+caller-actionable error that names the field.
 
 The MCP starts with **zero configuration.** When a tool
 needs a setting the agent hasn't wired in, the call fails
 with a caller-actionable error that points at the field name
 and hints at the fix. The full field spec — names, defaults,
 required-ness, examples, and "what goes wrong if wrong" — is
-in the *Configuration* section above. The runtime check for
-"is the wiring actually good?" is the `doctor` tool.
+in the *Configuration* section above.
 
 The flow:
 
@@ -175,16 +176,18 @@ The flow:
    every harness differs). The MCP does not write to your
    harness's config; you do.
 3. Start or restart the MCP.
-4. Call `doctor` to verify. On success it returns the
-   resolved config and the list of calendars on the account.
-   On failure it returns actionable hints.
+4. The smoke test is `list_calendars`: a wrong base URL or
+   wrong credentials fail loudly there with a field-named
+   error; a successful return means the wiring is good.
 
 ## Validate
 
 After install + configure, a minimal round-trip:
 
 1. `list_calendars` — should return at least the calendars on
-   the wired account.
+   the wired account. This is the smoke test for the
+   configuration: a wrong base URL or wrong credentials fail
+   loudly here with a field-named error.
 2. `create_calendar` with a throwaway name, then
    `list_calendars` — confirms the create round-trips.
 3. `create_event` with a `summary` and a `start` only —
@@ -196,9 +199,10 @@ After install + configure, a minimal round-trip:
 5. `delete_event` (or `delete_calendar`) on the throwaway —
    cleans up.
 
-If any step fails with a configuration error, call `doctor`
-— the response lists which field is missing or invalid. For
-the field spec, see *Configuration* above.
+If any step fails with a configuration error, the error
+itself names the field — read it against *Configuration*
+above. There is no separate preflight tool; the first failed
+tool call is the diagnostic.
 
 ## Deliberate reductions (read once, internalise)
 
@@ -227,8 +231,8 @@ implementation matches it as of the version you install:
 
 - `cal-scheduler` console script and `cal_scheduler` Python
   module: present.
-- The 11 core tools (3 calendar + 6 event + 1 datetime
-  helper + 1 `doctor` preflight): present.
+- The 10 core tools (3 calendar + 6 event + 1 datetime
+  helper): present.
 - The configuration field spec (this file's *Configuration*
   section): present, kept in lockstep with `config.py`'s
   `SCHEMA` tuple.
