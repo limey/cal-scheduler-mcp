@@ -185,7 +185,7 @@ def test_create_event_response_discloses_default_for_timed(monkeypatch):
     fake_store.save_new_event.return_value = None
     monkeypatch.setattr(server, "_store", lambda: fake_store)
 
-    # `calendar="personal"` skips _pick_calendar's config-touching fallbacks.
+    # `calendar="personal"` exercises the explicit path.
     result = server.create_event(
         summary="test", start="2026-06-30T21:00", calendar="personal",
     )
@@ -309,3 +309,193 @@ def test_list_events_recurring_series_is_recurring(monkeypatch):
         assert event.get("recurring") is True, (
             f"series occurrence came back without recurring=True: {event!r}"
         )
+
+
+# ── `calendar` parameter is required (PCD contract) ───────────────────────
+#
+# Every event tool's `calendar` is required; omitting it is a hard error
+# whose response names `list_calendars` (caller-actionable, points at
+# the discovery tool). The implicit-default-by-else-name heuristic is
+# gone — even a single-calendar account must be explicit. The error
+# fires *before* any store call: the MCP does not perform discovery on
+# the agent's behalf (PCD contract — the harness owns *how* to apply
+# the hint; the MCP owns the hint itself).
+
+
+def test_require_calendar_returns_calendar_when_given():
+    """Pure unit: a non-empty `calendar` is returned unchanged. No
+    store call — the contract is "if you said it, we use it"."""
+    from cal_scheduler import server
+
+    assert server._require_calendar("personal") == "personal"
+    assert server._require_calendar("work") == "work"
+
+
+def test_require_calendar_rejects_none():
+    """Pure unit: `None` raises a PCD-style error that names
+    `list_calendars` — no store call, no implicit fallback."""
+    from cal_scheduler import server
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server._require_calendar(None)
+
+
+def test_require_calendar_rejects_empty_string():
+    """Pure unit: empty string is treated the same as `None` — the
+    contract is "you must say which calendar, and say it with a name",
+    not "you must provide a parameter that is technically non-None"."""
+    from cal_scheduler import server
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server._require_calendar("")
+
+
+def test_require_calendar_does_not_consult_store(monkeypatch):
+    """Pure unit: the omitted-calendar error fires before any store
+    call. The MCP names the discovery tool; it does not perform
+    discovery on the agent's behalf (PCD contract)."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError):
+        server._require_calendar(None)
+
+    fake_store.calendar_names.assert_not_called()
+    fake_store.fetch_event.assert_not_called()
+    fake_store.save_new_event.assert_not_called()
+    fake_store.delete_event.assert_not_called()
+
+
+def test_require_calendar_does_not_silently_fall_back_to_single_calendar(monkeypatch):
+    """Single-calendar invariant: the contract is not "use the only
+    calendar on the account when one is given"; it is "the caller
+    must name the calendar". A single-calendar account still has to
+    say so explicitly. (The pure-unit version — no store call —
+    proves the *fallback* path is gone, not just hidden behind a flag.)"""
+    from cal_scheduler import server
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server._require_calendar(None)
+
+
+def test_create_event_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`create_event` with no `calendar` raises *before* the store is
+    touched. The PCD error is the agent's only signal — there is no
+    half-written event, no half-opened connection."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.create_event(summary="x", start="2026-06-30T21:00")
+
+    fake_store.save_new_event.assert_not_called()
+    fake_store.calendar_names.assert_not_called()
+
+
+def test_list_events_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`list_events` with no `calendar` raises before any store call.
+    Reads had a friendly fallback in the old design (per PR #24) — the
+    PCD contract is now uniform across reads and writes."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.list_events(
+            start="2026-06-30T00:00", end="2026-07-01T00:00",
+        )
+
+    fake_store.search_raw.assert_not_called()
+
+
+def test_update_event_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`update_event` with no `calendar` raises before the store is
+    touched. A misrouted update would silently change the wrong
+    calendar — the PCD error is the only thing that prevents it."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.update_event(uid="x@cal-scheduler", summary="new")
+
+    fake_store.fetch_event.assert_not_called()
+    fake_store.write_back.assert_not_called()
+
+
+def test_delete_event_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`delete_event` with no `calendar` raises before the store is
+    touched. Irreversible writes get the strictest possible guard."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.delete_event(uid="x@cal-scheduler")
+
+    fake_store.delete_event.assert_not_called()
+
+
+def test_exclude_occurrence_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`exclude_occurrence` with no `calendar` raises before the store
+    is touched. A misrouted EXDATE would silently edit the wrong
+    series — the PCD error is the only thing that prevents it."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.exclude_occurrence(
+            uid="x@cal-scheduler", occurrence="2026-07-07T09:00:00+12:00",
+        )
+
+    fake_store.fetch_event.assert_not_called()
+    fake_store.write_back.assert_not_called()
+
+
+def test_move_occurrence_rejects_null_calendar_before_any_store_call(monkeypatch):
+    """`move_occurrence` with no `calendar` raises before the store is
+    touched. A misrouted RECURRENCE-ID override would silently edit
+    the wrong series — the PCD error is the only thing that prevents it."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError, match="list_calendars"):
+        server.move_occurrence(
+            uid="x@cal-scheduler",
+            occurrence="2026-07-07T09:00:00+12:00",
+            new_start="2026-07-08T10:00:00+12:00",
+        )
+
+    fake_store.fetch_event.assert_not_called()
+    fake_store.write_back.assert_not_called()

@@ -44,19 +44,22 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _pick_calendar(calendar: str | None) -> str:
-    """Resolve which calendar a call targets, with friendly fallbacks."""
+def _require_calendar(calendar: str | None) -> str:
+    """Return the calendar name; raise a PCD-style error if omitted.
+
+    The MCP has no notion of an implicit default calendar — every event
+    tool's `calendar` is required, and the single explicit-or-error path
+    is the only branch. When the caller omits the parameter, the error
+    names `list_calendars` (the discovery tool) and fires *before* any
+    store call: the MCP does not perform discovery on the agent's behalf
+    (PCD contract — the harness owns *how* to apply the hint; the MCP
+    owns the hint itself).
+    """
     if calendar:
         return calendar
-    cfg = _config()
-    if cfg.default_calendar:
-        return cfg.default_calendar
-    names = _store().calendar_names()
-    if len(names) == 1:
-        return names[0]
     raise ValueError(
-        "no calendar given and no default; specify one of: "
-        + (", ".join(names) or "(none — create one first)")
+        "calendar is required; call `list_calendars` to discover the "
+        "calendars on this account, then retry with the desired name"
     )
 
 
@@ -213,8 +216,6 @@ def _redacted_config(cfg: Config, calendars: list[str]) -> dict:
             echo[f.name] = "<set>" if cfg.password else None
         elif f.name == "CAL_DEFAULT_TZ":
             echo[f.name] = cfg.default_tz
-        elif f.name == "CAL_DEFAULT_CALENDAR":
-            echo[f.name] = cfg.default_calendar
     echo["calendars"] = calendars
     return echo
 
@@ -393,9 +394,11 @@ def list_events(start: str, end: str, calendar: str | None = None) -> dict:
     """List event occurrences in [start, end], expanding recurring series.
 
     Dates are interpreted in the calendar's configured zone. Returns one entry per
-    occurrence (recurring instances are expanded), sorted by start.
+    occurrence (recurring instances are expanded), sorted by start. `calendar` is
+    required; omitting it raises a PCD-style error that names `list_calendars`
+    (the discovery tool — call it, then retry with the desired name).
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     zone = _zone()
     lo = _resolve_dt(start).value
     hi = _resolve_dt(end).value
@@ -450,9 +453,10 @@ def create_event(
     the calendar's configured zone (see `resolve_datetime` to confirm before
     writing); an offset-qualified time is honoured and stored in that zone. With
     no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
-    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12".
+    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12". `calendar` is
+    required; omitting it raises a PCD-style error that names `list_calendars`.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     rs = _resolve_dt(start)
     notes = [rs.note]
     dtend = None
@@ -501,9 +505,10 @@ def update_event(
     Preserves the UID and any single-occurrence exclusions/overrides. If you move
     `start` without giving `end`, the duration is kept. Moving `start` re-anchors
     the whole series — occurrences before the new start stop being generated (this
-    retimes an entire series; it does not split one at a date).
+    retimes an entire series; it does not split one at a date). `calendar` is
+    required; omitting it raises a PCD-style error that names `list_calendars`.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
@@ -580,8 +585,12 @@ def _set(ev, key: str, value: str) -> None:
 
 @mcp.tool()
 def delete_event(uid: str, calendar: str | None = None) -> dict:
-    """Delete a whole event/series (and any of its overrides). Irreversible."""
-    cal_name = _pick_calendar(calendar)
+    """Delete a whole event/series (and any of its overrides). Irreversible.
+
+    `calendar` is required; omitting it raises a PCD-style error that names
+    `list_calendars`.
+    """
+    cal_name = _require_calendar(calendar)
     _store().delete_event(cal_name, uid)
     return {"ok": True, "deleted": uid, "calendar": cal_name}
 
@@ -592,9 +601,10 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
 
     `occurrence` is the instance's current start exactly as returned by
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
-    Bare local times may not match.
+    Bare local times may not match. `calendar` is required; omitting it raises
+    a PCD-style error that names `list_calendars`.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
@@ -618,9 +628,10 @@ def move_occurrence(
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
     Bare local times may not match. `new_start`/`new_end` are where it moves to.
     Omit `new_end` to keep the occurrence's existing duration. The rest of the
-    series is unchanged.
+    series is unchanged. `calendar` is required; omitting it raises a PCD-style
+    error that names `list_calendars`.
     """
-    cal_name = _pick_calendar(calendar)
+    cal_name = _require_calendar(calendar)
     store = _store()
     event = store.fetch_event(cal_name, uid)
     cal = ical.parse(event.data)
