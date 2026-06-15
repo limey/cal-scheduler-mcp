@@ -83,6 +83,16 @@ trust. Our timezone discipline (store everything zoned to the configured zone; a
 naive datetimes are wall-time in that zone; honour and normalise offset-qualified ones;
 reject contradictory recurrence anchors) is a direct response to those failures.
 
+## 8. Economical with language
+
+Use the fewest words that carry the meaning. Source code is self-documenting
+through naming and structure; long docstrings, multi-line comments, and
+prose in test files (a frequent offender) usually mean the underlying code
+is the wrong shape — fix the code, not the comment. Verbose prose drifts:
+it goes stale faster than the code it describes, and readers (human or
+agent) start reasoning from the comment instead of the code. Tight name,
+short contract, silence where the code is clear.
+
 ---
 
 ## Progressive Configuration Discovery (PCD)
