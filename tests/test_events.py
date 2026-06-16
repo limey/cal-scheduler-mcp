@@ -88,6 +88,200 @@ def test_move_occurrence_adds_recurrence_id_override():
     assert {str(c["uid"]) for c in ical.vevents(cal)} == {"evt-1@cal-scheduler"}
 
 
+# ── count_series: post-edit state for the move/exclude response ──────────
+#
+# Both tools return `series_remaining` and `overrides` so the calling agent
+# can verify the rest-of-series-unchanged claim from the response payload.
+# `count_series` is the .ics-layer helper that produces the two counts from
+# a parsed calendar.
+
+
+def test_count_series_counts_master_only():
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    assert ical.count_series(cal) == (10, 0)
+
+
+def test_count_series_move_keeps_count_and_adds_override():
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    occ = dtstart + timedelta(weeks=1)
+    ical.add_override(
+        cal, occurrence=occ, new_start=occ + timedelta(hours=2), new_end=None, now=NOW,
+    )
+    # the override is its own instance — total stays 10
+    assert ical.count_series(cal) == (10, 1)
+
+
+def test_count_series_exclude_drops_one_instance():
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    ical.add_exdate(cal, dtstart + timedelta(weeks=1), NOW)
+    assert ical.count_series(cal) == (9, 0)
+
+
+def test_count_series_no_rrule_returns_one():
+    ev = ical.build_event(
+        uid="u", summary="s",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=datetime(2026, 6, 30, 22, 0, tzinfo=NZ), now=NOW,
+    )
+    cal = ical.event_calendar(ev)
+    assert ical.count_series(cal) == (1, 0)
+
+
+def test_count_series_all_day_finite():
+    cal = _master(dtstart=date(2026, 6, 30), rrule="FREQ=DAILY;COUNT=5")
+    assert ical.count_series(cal) == (5, 0)
+
+
+def test_count_series_infinite_returns_bounded_horizon_count():
+    # No COUNT, no UNTIL — the function must still return a finite number.
+    # 730-day horizon = ~104 weeks; exact value is library-defined, so check
+    # a range that proves the rule was expanded and not just the master.
+    cal = _master(
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        rrule="FREQ=WEEKLY",
+    )
+    instances, overrides = ical.count_series(cal)
+    assert 100 < instances < 110
+    assert overrides == 0
+
+
+# ── move/exclude echo series state in the response payload ──────────────
+#
+# The post-edit count and override count are the calling agent's only
+# proof that the rest of the series is intact — without them, the agent
+# has to trust a docstring promise or re-list. The integration tests
+# below exercise the full tool path (mocked store, real _resolve_dt).
+
+
+def test_move_occurrence_response_includes_series_remaining_and_overrides(monkeypatch):
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.move_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=(dtstart + timedelta(weeks=1)).isoformat(),
+        new_start=(dtstart + timedelta(weeks=1, hours=2)).isoformat(),
+        calendar="personal",
+    )
+
+    assert result["ok"] is True
+    assert result["overrides"] == 1
+    assert result["series_remaining"] == 10
+    # existing fields preserved
+    assert "moved_from" in result
+    assert "note" in result
+
+
+def test_move_occurrence_response_with_prior_override(monkeypatch):
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    # first move: instance 2 (one week after DTSTART)
+    occ1 = dtstart + timedelta(weeks=1)
+    ical.add_override(
+        cal, occurrence=occ1, new_start=occ1 + timedelta(hours=2), new_end=None, now=NOW,
+    )
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.move_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=(dtstart + timedelta(weeks=2)).isoformat(),
+        new_start=(dtstart + timedelta(weeks=2, hours=2)).isoformat(),
+        calendar="personal",
+    )
+
+    assert result["overrides"] == 2
+    assert result["series_remaining"] == 10
+
+
+def test_exclude_occurrence_response_includes_series_remaining_and_overrides(monkeypatch):
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    # one prior override
+    occ1 = dtstart + timedelta(weeks=1)
+    ical.add_override(
+        cal, occurrence=occ1, new_start=occ1 + timedelta(hours=2), new_end=None, now=NOW,
+    )
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.exclude_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=(dtstart + timedelta(weeks=4)).isoformat(),
+        calendar="personal",
+    )
+
+    assert result["ok"] is True
+    assert result["overrides"] == 1  # exclude doesn't add an override
+    assert result["series_remaining"] == 9  # 10 - 1
+    assert "excluded" in result
+
+
+def test_exclude_occurrence_response_no_prior_overrides(monkeypatch):
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.exclude_occurrence(
+        uid="evt-1@cal-scheduler",
+        occurrence=(dtstart + timedelta(weeks=1)).isoformat(),
+        calendar="personal",
+    )
+
+    assert result["overrides"] == 0
+    assert result["series_remaining"] == 9
+
+
 # ── create_event response (self-teaching default) ──────────────────────────
 #
 # The disclosure's *value* is derived from the live `ical.default_dtend` —
