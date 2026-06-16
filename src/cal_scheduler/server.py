@@ -54,6 +54,34 @@ def _require_calendar(calendar: str | None) -> str:
     )
 
 
+def _require_known_calendar(calendar: str | None) -> str:
+    """Return a calendar name that exists on the account; raise a PCD-style
+    error otherwise.
+
+    Strict superset of `_require_calendar`: same omit-message shape, plus
+    an unknown-name rejection. Used on the write path (`create_event`) where
+    guessing the wrong calendar is the costly case (eval §5: a vibe-classified
+    call landing on the wrong calendar with no friction, the only safety net
+    being the post-write `calendar` echo in the response). The agent must
+    name a calendar that exists on the account, or fail loudly before any
+    `.ics` mutation. Reads (`list_events`) keep `_require_calendar`'s
+    friendly omit-only shape — see issue #35.
+    """
+    names = _store().calendar_names()
+    available = ", ".join(names) if names else "(none — create one first)"
+    if not calendar:
+        raise ValueError(
+            "calendar is required; call `list_calendars` to discover the "
+            f"calendars on this account (available: {available})"
+        )
+    if calendar not in names:
+        raise ValueError(
+            f"calendar {calendar!r} not found; call `list_calendars` to "
+            f"discover the calendars on this account (available: {available})"
+        )
+    return calendar
+
+
 def _resolve_dt(value: str) -> Resolved:
     return resolve(value, _zone())
 
@@ -207,9 +235,11 @@ def create_event(
     the calendar's configured zone (see `resolve_datetime` to confirm before
     writing); an offset-qualified time is honoured and stored in that zone. With
     no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
-    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12".
+    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12". `calendar` is
+    required in practice — there is no default calendar. Pick deliberately;
+    events are not validated against calendar type.
     """
-    cal_name = _require_calendar(calendar)
+    cal_name = _require_known_calendar(calendar)
     rs = _resolve_dt(start)
     notes = [rs.note]
     dtend = None

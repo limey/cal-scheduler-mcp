@@ -182,6 +182,7 @@ def test_create_event_response_discloses_default_for_timed(monkeypatch):
     monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
 
     fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
     fake_store.save_new_event.return_value = None
     monkeypatch.setattr(server, "_store", lambda: fake_store)
 
@@ -372,3 +373,116 @@ def test_calendar_required_when_account_has_none(monkeypatch):
         server.create_event(summary="x", start="2026-06-30T21:00")
     assert "list_calendars" in str(excinfo.value)
     assert "create one first" in str(excinfo.value)
+
+
+# ── write-side calendar disambiguation (eval rec 1 / issue #35) ───────────
+#
+# `list_events` already rejects a missing `calendar` with a PCD-style
+# error that names the valid values inline. `create_event` takes it one
+# step further: an unknown calendar name (e.g. `calendar="Vacation"` on
+# an account with `personal`/`work`) is rejected too, with the same
+# error shape — same `list_calendars` hint, same inline `available:`
+# list. The eval identified this as the "riskiest gap" on the surface:
+# reads enforce, writes don't, and writes are where mis-classifying the
+# calendar actually matters.
+
+
+def test_create_event_unknown_calendar_raises_with_inline_valid_values(monkeypatch):
+    """An unknown calendar name on `create_event` is rejected before any
+    `.ics` mutation, with the same PCD shape as the omit case — same
+    `list_calendars` hint, same inline `available:` list of valid values."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal", "work"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    with pytest.raises(ValueError) as excinfo:
+        server.create_event(
+            summary="dentist", start="2026-06-30T21:00", calendar="Vacation",
+        )
+
+    msg = str(excinfo.value)
+    # Same field names + same ordering as the list_events omit error.
+    assert "Vacation" in msg, f"error must name the rejected calendar: {msg!r}"
+    assert "list_calendars" in msg, f"error must hint at list_calendars: {msg!r}"
+    assert "available:" in msg, f"error must include available: clause: {msg!r}"
+    assert "personal" in msg and "work" in msg, (
+        f"error must name the valid calendars inline: {msg!r}"
+    )
+    # The bad name comes first, the fix (list_calendars) follows — same
+    # shape as list_events, plus the unknown-name prefix.
+    assert msg.index("Vacation") < msg.index("list_calendars") < msg.index("available:")
+
+    # Pre-validation, not post-hoc: no .ics was written.
+    fake_store.save_new_event.assert_not_called()
+    # The discovery tool was actually called — the error's "available"
+    # list comes from a live enumeration, not a hard-coded name.
+    fake_store.calendar_names.assert_called_once()
+
+
+def test_create_event_unknown_calendar_error_matches_list_events_omit_shape(monkeypatch):
+    """The unknown-name error and the omit error share the same shape
+    after the prefix — same `list_calendars` hint, same `(available: ...)`
+    ordering. A cold agent that learned the omit case's message can parse
+    the unknown case's message the same way."""
+    import re
+
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal", "work"]
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    # Omit case
+    with pytest.raises(ValueError) as omit_exc:
+        server.create_event(summary="x", start="2026-06-30T21:00")
+    omit_msg = str(omit_exc.value)
+
+    # Unknown case
+    with pytest.raises(ValueError) as unknown_exc:
+        server.create_event(
+            summary="x", start="2026-06-30T21:00", calendar="Vacation",
+        )
+    unknown_msg = str(unknown_exc.value)
+
+    # Strip the leading prefix (varies: "calendar is required;" vs.
+    # "calendar 'Vacation' not found;") — what follows must be identical.
+    omit_suffix = re.sub(r"^calendar[^;]+;", "", omit_msg)
+    unknown_suffix = re.sub(r"^calendar[^;]+;", "", unknown_msg)
+    assert omit_suffix == unknown_suffix, (
+        f"shape mismatch: omit suffix {omit_suffix!r} != unknown suffix {unknown_suffix!r}"
+    )
+
+
+def test_create_event_known_calendar_succeeds(monkeypatch):
+    """The happy path: an explicit, valid calendar passes the guard and
+    reaches the store. Pins the behavior the new guard exists to protect
+    — the call must NOT be rejected on the success path."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal", "work"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="dentist", start="2026-06-30T21:00", calendar="personal",
+    )
+
+    assert result["ok"] is True
+    assert result["calendar"] == "personal"
+    fake_store.save_new_event.assert_called_once()
+    # The discovery call happened (guard pre-validates) but the call
+    # itself was successful.
+    fake_store.calendar_names.assert_called_once()

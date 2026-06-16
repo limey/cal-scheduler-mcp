@@ -190,10 +190,13 @@ After install + configure, a minimal round-trip:
    loudly here with a field-named error.
 2. `create_calendar` with a throwaway name, then
    `list_calendars` — confirms the create round-trips.
-3. `create_event` with a `summary` and a `start` only —
-   should return a 1h event in the configured zone and
-   surface the default in the response (this is the
-   self-teaching response; see `PHILOSOPHY.md` §5).
+3. `create_event` with a `summary`, a `start`, and a `calendar` —
+   should return a 1h event in the configured zone and surface
+   the default in the response (this is the self-teaching
+   response; see `PHILOSOPHY.md` §5). `calendar` is required in
+   practice (no default calendar) and must name an existing
+   calendar — a typo is rejected with the same PCD-style error
+   the read path uses, naming the valid values inline.
 4. `list_events` over a window covering the event — confirms
    the read round-trips.
 5. `delete_event` (or `delete_calendar`) on the throwaway —
