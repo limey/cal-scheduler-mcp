@@ -356,6 +356,41 @@ def dropped_on_reanchor(
     return max(count, 0)
 
 
+# Horizon for unbounded series in `count_series`. Long enough to cover any
+# realistic finite series; the response field is documented as "over the
+# horizon" for the infinite case so a cold agent reading a count cannot
+# mistake it for a lifetime value.
+_SERIES_HORIZON = timedelta(days=730)
+
+
+def count_series(
+    cal: Calendar, *, horizon: timedelta = _SERIES_HORIZON
+) -> tuple[int, int]:
+    """Return (instances, overrides) for the series over `horizon` from DTSTART.
+
+    A finite series (RRULE with COUNT or UNTIL) returns the full lifetime count;
+    an infinite one returns the bounded horizon count. Instances are the
+    rule-generated occurrences minus EXDATE, plus RECURRENCE-ID overrides — the
+    distinct instances the series still produces.
+    """
+    import recurring_ical_events
+
+    ev = master(cal)
+    overrides = sum(1 for c in vevents(cal) if "RECURRENCE-ID" in c)
+    if "rrule" not in ev:
+        return 1, overrides
+
+    ds = ev.decoded("dtstart")
+    if isinstance(ds, datetime):
+        lo, hi = ds, ds + horizon
+    else:
+        lo = datetime(ds.year, ds.month, ds.day, tzinfo=ZoneInfo("UTC"))
+        hi = lo + horizon
+
+    n = sum(1 for _ in recurring_ical_events.of(cal).between(lo, hi))
+    return n, overrides
+
+
 def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
     """Serialise one expanded occurrence into the agent-facing dict.
 

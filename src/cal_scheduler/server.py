@@ -379,7 +379,9 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
 
     `occurrence` is the instance's current start exactly as returned by
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
-    Bare local times may not match.
+    Bare local times may not match. The response includes `series_remaining`
+    (occurrences left in the series) and `overrides` (RECURRENCE-ID overrides
+    on the series) so the rest-of-series-unchanged claim is observable.
     """
     cal_name = _require_calendar(calendar)
     store = _store()
@@ -387,8 +389,15 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
     cal = ical.parse(event.data)
     occ = _resolve_dt(occurrence).value
     ical.add_exdate(cal, occ, _now())
+    series_remaining, overrides = ical.count_series(cal)
     store.write_back(event, ical.serialize(cal))
-    return {"ok": True, "uid": uid, "excluded": occ.isoformat()}
+    return {
+        "ok": True,
+        "uid": uid,
+        "excluded": occ.isoformat(),
+        "series_remaining": series_remaining,
+        "overrides": overrides,
+    }
 
 
 @mcp.tool()
@@ -405,7 +414,9 @@ def move_occurrence(
     `list_events`, including the UTC offset (e.g. `2026-06-18T09:00:00+12:00`).
     Bare local times may not match. `new_start`/`new_end` are where it moves to.
     Omit `new_end` to keep the occurrence's existing duration. The rest of the
-    series is unchanged.
+    series is unchanged. The response includes `series_remaining` (occurrences
+    left in the series) and `overrides` (RECURRENCE-ID overrides on the series)
+    so the rest-of-series-unchanged claim is observable.
     """
     cal_name = _require_calendar(calendar)
     store = _store()
@@ -420,8 +431,16 @@ def move_occurrence(
             "omit `new_end` to keep the occurrence's existing duration"
         )
     ical.add_override(cal, occurrence=occ, new_start=ns.value, new_end=ne, now=_now())
+    series_remaining, overrides = ical.count_series(cal)
     store.write_back(event, ical.serialize(cal))
-    return {"ok": True, "uid": uid, "moved_from": occ.isoformat(), "note": ns.note}
+    return {
+        "ok": True,
+        "uid": uid,
+        "moved_from": occ.isoformat(),
+        "note": ns.note,
+        "series_remaining": series_remaining,
+        "overrides": overrides,
+    }
 
 
 def main() -> None:
