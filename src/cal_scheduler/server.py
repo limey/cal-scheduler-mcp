@@ -58,17 +58,11 @@ def _require_calendar(calendar: str | None) -> str:
 
 
 def _require_known_calendar(calendar: str | None) -> str:
-    """Return a calendar name that exists on the account; raise a PCD-style
-    error otherwise.
+    """Return a calendar name that exists on the account, or raise.
 
-    Strict superset of `_require_calendar`: same omit-message shape, plus
-    an unknown-name rejection. Used on the write path (`create_event`) where
-    guessing the wrong calendar is the costly case (eval §5: a vibe-classified
-    call landing on the wrong calendar with no friction, the only safety net
-    being the post-write `calendar` echo in the response). The agent must
-    name a calendar that exists on the account, or fail loudly before any
-    `.ics` mutation. Reads (`list_events`) keep `_require_calendar`'s
-    friendly omit-only shape — see issue #35.
+    Like `_require_calendar` but also rejects unknown names — writes
+    must fail loudly before any `.ics` mutation rather than land on
+    the wrong calendar.
     """
     names = _store().calendar_names()
     available = ", ".join(names) if names else "(none — create one first)"
@@ -104,11 +98,9 @@ def _nonpositive_interval(start_dt, end_dt) -> bool:
 def _humanize_timedelta(td: timedelta) -> str:
     """Render a `timedelta` as a human-readable English phrase.
 
-    Used by the self-teaching disclosure on `create_event`'s default
-    path (PHILOSOPHY §5). The message the agent sees is built from the
-    *actual* defaulted duration the .ics layer applied — never from a
-    hard-coded "1 hour" / "1 day" string — so the two cannot drift if
-    the default ever changes (issue #7).
+    The self-teaching response builds the message from the actual
+    defaulted duration the .ics layer applied, never from a hard-coded
+    phrase, so the two cannot drift if the default changes.
     """
     total = int(td.total_seconds())
     days, rem = divmod(total, 86400)
@@ -127,17 +119,9 @@ def _humanize_timedelta(td: timedelta) -> str:
 
 
 def _end_default_message(start_value, end: str | None) -> str | None:
-    """Self-teaching response helper (PHILOSOPHY §5).
-
-    When the agent calls `create_event` with only a `start` and no
-    `end`, the .ics layer applies a default duration (see
-    `ical.default_dtend` — the single source of truth for both the
-    persisted value and this disclosure). The tool response names that
-    duration so the agent can learn from the call and remember for
-    next time. Returns `None` when `end` was given — no default to
-    disclose. The message is built from the value the helper produced,
-    not from a hard-coded phrase, so the response and the persisted
-    value can never disagree (issue #7).
+    """Self-teaching helper: returns the disclosure message naming the
+    default duration `ical.default_dtend` will apply when `end` is
+    omitted, or `None` when `end` was given.
     """
     if end is not None:
         return None
@@ -150,25 +134,9 @@ def _end_default_message(start_value, end: str | None) -> str | None:
     return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
 
 
-# ── parameter-description helpers (issue #38) ─────────────────────────────────
-#
-# The cold agent reads parameter descriptions before any tool call. The zone
-# interpretation and the duration default are pre-write facts the agent needs
-# to write the right instant on the first try — surfacing them in prose on
-# the tool-level docstring wasn't enough (eval 20260617-184032 §9). These
-# strings are baked into the parameter descriptions at module-load time.
-#
-# `_ZONE` is the configured zone (read once, via env, mirroring the SCHEMA
-# default for CAL_DEFAULT_TZ). The descriptions reference `_ZONE` directly, so
-# a server restart with a non-Auckland zone surfaces the new zone — that's
-# the "honesty test" in the issue's verification list.
-#
-# Reading `CAL_DEFAULT_TZ` here bypasses `Config.from_env()`'s required-field
-# check on `CALDAV_BASE_URL` (PHILOSOPHY PCD: the server still starts with
-# zero config and only fails on first CalDAV-backed tool call). The
-# description text reflects the *configured* zone; if the operator never set
-# `CAL_DEFAULT_TZ`, both the description and the runtime fall back to the
-# same SCHEMA default (`Pacific/Auckland`).
+# Module-level zone + default-duration strings baked into parameter
+# descriptions at import time. `CAL_DEFAULT_TZ` is read here, not via
+# `Config.from_env`, so the server can still start before CalDAV is wired.
 _ZONE = os.environ.get("CAL_DEFAULT_TZ", "Pacific/Auckland").strip() or "Pacific/Auckland"
 _TIMED_DEFAULT, _ALL_DAY_DEFAULT = ical.default_durations()
 _TIMED_DEFAULT_PHRASE = _humanize_timedelta(_TIMED_DEFAULT)
@@ -248,10 +216,10 @@ def list_events(start: str, end: str, calendar: str | None = None) -> dict:
     occs = []
     for raw in _store().search_raw(cal_name, lo_dt, hi_dt):
         cal = ical.parse(raw)
-        # Derive `recurring` from the *source* master VEVENT, not the
+        # Derive `recurring` from the source master VEVENT, not the
         # expanded occurrence. `recurring_ical_events` adds a RECURRENCE-ID
         # to every expansion (including one-off events) — see
-        # ical.occurrence_dict's docstring / issue #8. The master is the
+        # `ical.occurrence_dict` for why. The master is the
         # VEVENT without a RECURRENCE-ID; it has RRULE iff the source is
         # a series.
         is_recurring = "RRULE" in ical.master(cal)
