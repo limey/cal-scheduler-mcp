@@ -9,11 +9,14 @@ so the same input yields the same bytes (handy if the .ics store is kept in git)
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from . import ical
 from .config import Config
@@ -147,6 +150,58 @@ def _end_default_message(start_value, end: str | None) -> str | None:
     return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
 
 
+# ── parameter-description helpers (issue #38) ─────────────────────────────────
+#
+# The cold agent reads parameter descriptions before any tool call. The zone
+# interpretation and the duration default are pre-write facts the agent needs
+# to write the right instant on the first try — surfacing them in prose on
+# the tool-level docstring wasn't enough (eval 20260617-184032 §9). These
+# strings are baked into the parameter descriptions at module-load time.
+#
+# `_ZONE` is the configured zone (read once, via env, mirroring the SCHEMA
+# default for CAL_DEFAULT_TZ). The descriptions reference `_ZONE` directly, so
+# a server restart with a non-Auckland zone surfaces the new zone — that's
+# the "honesty test" in the issue's verification list.
+#
+# Reading `CAL_DEFAULT_TZ` here bypasses `Config.from_env()`'s required-field
+# check on `CALDAV_BASE_URL` (PHILOSOPHY PCD: the server still starts with
+# zero config and only fails on first CalDAV-backed tool call). The
+# description text reflects the *configured* zone; if the operator never set
+# `CAL_DEFAULT_TZ`, both the description and the runtime fall back to the
+# same SCHEMA default (`Pacific/Auckland`).
+_ZONE = os.environ.get("CAL_DEFAULT_TZ", "Pacific/Auckland").strip() or "Pacific/Auckland"
+_TIMED_DEFAULT, _ALL_DAY_DEFAULT = ical.default_durations()
+_TIMED_DEFAULT_PHRASE = _humanize_timedelta(_TIMED_DEFAULT)
+_ALL_DAY_DEFAULT_PHRASE = _humanize_timedelta(_ALL_DAY_DEFAULT)
+
+_START_DESC = (
+    f"ISO 8601 datetime. A bare local time is interpreted as wall "
+    f"time in the configured zone (`{_ZONE}`); an offset-qualified "
+    f"time is honoured and stored in that zone. Use "
+    f"`resolve_datetime` to confirm before writing. With no `end`, "
+    f"the event defaults to {_TIMED_DEFAULT_PHRASE} after this "
+    f"`start` ({_ALL_DAY_DEFAULT_PHRASE} for all-day)."
+)
+_END_DESC = (
+    f"ISO 8601 datetime. Omit for the default duration: "
+    f"{_TIMED_DEFAULT_PHRASE} after `start` for timed events, "
+    f"{_ALL_DAY_DEFAULT_PHRASE} after `start` for all-day. Must be "
+    f"after `start`."
+)
+_UPDATE_START_DESC = (
+    f"ISO 8601 datetime. A bare local time is interpreted as wall "
+    f"time in the configured zone (`{_ZONE}`); an offset-qualified "
+    f"time is honoured and stored in that zone. Use "
+    f"`resolve_datetime` to confirm before writing. If `end` is "
+    f"omitted, the existing duration is kept."
+)
+_MOVE_NEW_START_DESC = (
+    f"ISO 8601 datetime. A bare local time is interpreted as wall "
+    f"time in the configured zone (`{_ZONE}`); an offset-qualified "
+    f"time is honoured and stored in that zone. Use "
+    f"`resolve_datetime` to confirm before writing."
+)
+
 # ── calendars ─────────────────────────────────────────────────────────────────
 
 
@@ -222,8 +277,8 @@ def resolve_datetime(value: str) -> dict:
 @mcp.tool()
 def create_event(
     summary: str,
-    start: str,
-    end: str | None = None,
+    start: Annotated[str, Field(description=_START_DESC)],
+    end: Annotated[str | None, Field(description=_END_DESC)] = None,
     calendar: str | None = None,
     description: str | None = None,
     location: str | None = None,
@@ -231,13 +286,11 @@ def create_event(
 ) -> dict:
     """Create an event (single, or recurring if `rrule` is given).
 
-    `start`/`end` are ISO 8601. A bare local time is interpreted as wall time in
-    the calendar's configured zone (see `resolve_datetime` to confirm before
-    writing); an offset-qualified time is honoured and stored in that zone. With
-    no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
-    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12". `calendar` is
-    required in practice — there is no default calendar. Pick deliberately;
-    events are not validated against calendar type.
+    `start`/`end` are ISO 8601 (see parameter docs for zone + default-duration
+    details — read those before writing). `rrule` is a raw RRULE body,
+    e.g. "FREQ=WEEKLY;COUNT=12". `calendar` is required in practice — there
+    is no default calendar. Pick deliberately; events are not validated
+    against calendar type.
     """
     cal_name = _require_known_calendar(calendar)
     rs = _resolve_dt(start)
@@ -277,7 +330,7 @@ def update_event(
     uid: str,
     calendar: str | None = None,
     summary: str | None = None,
-    start: str | None = None,
+    start: Annotated[str | None, Field(description=_UPDATE_START_DESC)] = None,
     end: str | None = None,
     description: str | None = None,
     location: str | None = None,
@@ -404,7 +457,7 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
 def move_occurrence(
     uid: str,
     occurrence: str,
-    new_start: str,
+    new_start: Annotated[str, Field(description=_MOVE_NEW_START_DESC)],
     new_end: str | None = None,
     calendar: str | None = None,
 ) -> dict:

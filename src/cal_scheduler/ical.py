@@ -88,6 +88,18 @@ def default_dtend(dtstart: datetime | date) -> datetime | date:
     return dtstart + _DEFAULT_ALL_DAY_DTEND
 
 
+def default_durations() -> tuple[timedelta, timedelta]:
+    """The `(timed, all_day)` default durations `default_dtend` applies.
+
+    Exposed for callers that need to name the current defaults in prose
+    — e.g., the tool layer's parameter descriptions (issue #38). The
+    private constants above are the single source of truth; this helper
+    just hands them out so the doc and the persisted value can never
+    drift if the default ever changes.
+    """
+    return (_DEFAULT_TIMED_DTEND, _DEFAULT_ALL_DAY_DTEND)
+
+
 # ── recurrence validation ─────────────────────────────────────────────────────
 
 
