@@ -88,12 +88,7 @@ def test_move_occurrence_adds_recurrence_id_override():
     assert {str(c["uid"]) for c in ical.vevents(cal)} == {"evt-1@cal-scheduler"}
 
 
-# ── count_series: post-edit state for the move/exclude response ──────────
-#
-# Both tools return `series_remaining` and `overrides` so the calling agent
-# can verify the rest-of-series-unchanged claim from the response payload.
-# `count_series` is the .ics-layer helper that produces the two counts from
-# a parsed calendar.
+# ── count_series ─────────────────────────────────────────────────────────────
 
 
 def test_count_series_counts_master_only():
@@ -149,11 +144,6 @@ def test_count_series_infinite_returns_bounded_horizon_count():
 
 
 # ── move/exclude echo series state in the response payload ──────────────
-#
-# The post-edit count and override count are the calling agent's only
-# proof that the rest of the series is intact — without them, the agent
-# has to trust a docstring promise or re-list. The integration tests
-# below exercise the full tool path (mocked store, real _resolve_dt).
 
 
 def test_move_occurrence_response_includes_series_remaining_and_overrides(monkeypatch):
@@ -283,11 +273,6 @@ def test_exclude_occurrence_response_no_prior_overrides(monkeypatch):
 
 
 # ── create_event response (self-teaching default) ──────────────────────────
-#
-# The disclosure's *value* is derived from the live `ical.default_dtend` —
-# never a hard-coded phrase. If the default changes, the message changes
-# automatically; the test stays green without anyone touching the message
-# template. Issue #7.
 
 
 def test_humanize_timedelta():
@@ -302,8 +287,6 @@ def test_humanize_timedelta():
 
 
 def test_end_default_message_for_timed_names_live_default():
-    """The message must name the duration the live default produces —
-    derived from `ical.default_dtend`, not a hard-coded '1 hour' phrase."""
     from cal_scheduler import ical
     from cal_scheduler.server import _end_default_message, _humanize_timedelta
 
@@ -325,10 +308,6 @@ def test_end_default_message_for_all_day_names_live_default():
 
 
 def test_end_default_message_tracks_a_changed_default_for_timed(monkeypatch):
-    """Anti-drift: if `default_dtend` returns 15 minutes instead of 1 hour,
-    the message must say '15 minutes' automatically — proving the message
-    is built from the value, not from a hard-coded phrase.
-    """
     from cal_scheduler import ical
     from cal_scheduler.server import _end_default_message
 
@@ -362,11 +341,6 @@ def test_end_default_message_none_when_end_given():
 
 
 def test_create_event_response_discloses_default_for_timed(monkeypatch):
-    """Self-teaching response: when the agent omits `end`, the tool's
-    response must include the default-end message so the agent can
-    learn from the call. The message names the *live* default — the
-    same value the server applies — not a hard-coded phrase.
-    Exercises the full path (helper + integration), not just the helper."""
     from unittest.mock import MagicMock
     from cal_scheduler import ical, server
     from cal_scheduler.server import _humanize_timedelta
@@ -389,18 +363,9 @@ def test_create_event_response_discloses_default_for_timed(monkeypatch):
     assert _humanize_timedelta(end - start) in result["note"]
 
 
-# ── `recurring` flag honesty (regression for eval §5 / issue #8) ───────────
-#
-# `list_events` previously returned `"recurring": true` for one-off events
-# because `occurrence_dict` derived the flag from the *expanded occurrence*
-# and the `recurring_ical_events` library adds a `RECURRENCE-ID` to every
-# expansion, including one-offs. The flag is the contract an agent uses to
-# decide single- vs series-edits; a wrong value silently breaks the edit
-# path. Regression: a one-off must come back with no `recurring` key, a
-# series must come back with `"recurring": true`.
+# ── `recurring` flag honesty ─────────────────────────────────────────────────
 
 def test_occurrence_dict_default_is_not_recurring():
-    """Default keyword flag is False: helper does NOT emit `recurring`."""
     ev = ical.build_event(
         uid="u", summary="s",
         dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
@@ -431,9 +396,6 @@ def test_occurrence_dict_recurring_false_when_flag_false():
 
 
 def test_list_events_one_off_is_not_recurring(monkeypatch):
-    """End-to-end: a one-off stored and listed comes back without a
-    `recurring` key, even though `recurring_ical_events` stamps a
-    RECURRENCE-ID on every expansion. This is the eval §5 bug."""
     from unittest.mock import MagicMock
     from cal_scheduler import server
 
@@ -465,12 +427,11 @@ def test_list_events_one_off_is_not_recurring(monkeypatch):
     event = out["events"][0]
     assert event["uid"] == "dentist@cal-scheduler"
     assert event.get("recurring", False) is False, (
-        f"one-off came back recurring=True — issue #8 regression: {event!r}"
+        f"one-off came back recurring=True: {event!r}"
     )
 
 
 def test_list_events_recurring_series_is_recurring(monkeypatch):
-    """End-to-end: a series comes back with `recurring=True`."""
     from unittest.mock import MagicMock
     from cal_scheduler import server
 
@@ -506,18 +467,10 @@ def test_list_events_recurring_series_is_recurring(monkeypatch):
         )
 
 
-# ── `calendar` parameter is required (PCD contract) ───────────────────────
-#
-# Every event tool's `calendar` is required; omitting it is a hard error
-# whose response names `list_calendars` (caller-actionable, points at
-# the discovery tool). The implicit-default-by-else-name heuristic is
-# gone — even a single-calendar account must be explicit.
+# ── `calendar` parameter is required ─────────────────────────────────────────
 
 
 def test_calendar_omitted_raises_with_list_calendars_hint(monkeypatch):
-    """Omitting `calendar` on `create_event` raises a ValueError whose
-    message names `list_calendars` and lists the calendars on the
-    account — PCD-style, caller-actionable."""
     from unittest.mock import MagicMock
 
     from cal_scheduler import server
@@ -536,8 +489,6 @@ def test_calendar_omitted_raises_with_list_calendars_hint(monkeypatch):
 
 
 def test_calendar_required_even_with_single_calendar(monkeypatch):
-    """A single-calendar account still requires the call to be explicit:
-    the implicit-default-by-else-name heuristic is gone."""
     from unittest.mock import MagicMock
 
     from cal_scheduler import server
@@ -552,8 +503,6 @@ def test_calendar_required_even_with_single_calendar(monkeypatch):
 
 
 def test_calendar_required_when_account_has_none(monkeypatch):
-    """Zero-calendar account: error names `list_calendars` and tells
-    the caller to create one first (no `available:` clause to lie about)."""
     from unittest.mock import MagicMock
 
     from cal_scheduler import server
@@ -569,22 +518,10 @@ def test_calendar_required_when_account_has_none(monkeypatch):
     assert "create one first" in str(excinfo.value)
 
 
-# ── write-side calendar disambiguation (eval rec 1 / issue #35) ───────────
-#
-# `list_events` already rejects a missing `calendar` with a PCD-style
-# error that names the valid values inline. `create_event` takes it one
-# step further: an unknown calendar name (e.g. `calendar="Vacation"` on
-# an account with `personal`/`work`) is rejected too, with the same
-# error shape — same `list_calendars` hint, same inline `available:`
-# list. The eval identified this as the "riskiest gap" on the surface:
-# reads enforce, writes don't, and writes are where mis-classifying the
-# calendar actually matters.
+# ── write-side calendar disambiguation ─────────────────────────────────────
 
 
 def test_create_event_unknown_calendar_raises_with_inline_valid_values(monkeypatch):
-    """An unknown calendar name on `create_event` is rejected before any
-    `.ics` mutation, with the same PCD shape as the omit case — same
-    `list_calendars` hint, same inline `available:` list of valid values."""
     from unittest.mock import MagicMock
 
     from cal_scheduler import server
@@ -620,10 +557,6 @@ def test_create_event_unknown_calendar_raises_with_inline_valid_values(monkeypat
 
 
 def test_create_event_unknown_calendar_error_matches_list_events_omit_shape(monkeypatch):
-    """The unknown-name error and the omit error share the same shape
-    after the prefix — same `list_calendars` hint, same `(available: ...)`
-    ordering. A cold agent that learned the omit case's message can parse
-    the unknown case's message the same way."""
     import re
 
     from unittest.mock import MagicMock
@@ -657,9 +590,6 @@ def test_create_event_unknown_calendar_error_matches_list_events_omit_shape(monk
 
 
 def test_create_event_known_calendar_succeeds(monkeypatch):
-    """The happy path: an explicit, valid calendar passes the guard and
-    reaches the store. Pins the behavior the new guard exists to protect
-    — the call must NOT be rejected on the success path."""
     from unittest.mock import MagicMock
 
     from cal_scheduler import server

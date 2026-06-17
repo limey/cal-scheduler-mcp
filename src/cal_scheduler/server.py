@@ -9,11 +9,14 @@ so the same input yields the same bytes (handy if the .ics store is kept in git)
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from . import ical
 from .config import Config
@@ -55,17 +58,11 @@ def _require_calendar(calendar: str | None) -> str:
 
 
 def _require_known_calendar(calendar: str | None) -> str:
-    """Return a calendar name that exists on the account; raise a PCD-style
-    error otherwise.
+    """Return a calendar name that exists on the account, or raise.
 
-    Strict superset of `_require_calendar`: same omit-message shape, plus
-    an unknown-name rejection. Used on the write path (`create_event`) where
-    guessing the wrong calendar is the costly case (eval §5: a vibe-classified
-    call landing on the wrong calendar with no friction, the only safety net
-    being the post-write `calendar` echo in the response). The agent must
-    name a calendar that exists on the account, or fail loudly before any
-    `.ics` mutation. Reads (`list_events`) keep `_require_calendar`'s
-    friendly omit-only shape — see issue #35.
+    Like `_require_calendar` but also rejects unknown names — writes
+    must fail loudly before any `.ics` mutation rather than land on
+    the wrong calendar.
     """
     names = _store().calendar_names()
     available = ", ".join(names) if names else "(none — create one first)"
@@ -101,11 +98,9 @@ def _nonpositive_interval(start_dt, end_dt) -> bool:
 def _humanize_timedelta(td: timedelta) -> str:
     """Render a `timedelta` as a human-readable English phrase.
 
-    Used by the self-teaching disclosure on `create_event`'s default
-    path (PHILOSOPHY §5). The message the agent sees is built from the
-    *actual* defaulted duration the .ics layer applied — never from a
-    hard-coded "1 hour" / "1 day" string — so the two cannot drift if
-    the default ever changes (issue #7).
+    The self-teaching response builds the message from the actual
+    defaulted duration the .ics layer applied, never from a hard-coded
+    phrase, so the two cannot drift if the default changes.
     """
     total = int(td.total_seconds())
     days, rem = divmod(total, 86400)
@@ -124,17 +119,9 @@ def _humanize_timedelta(td: timedelta) -> str:
 
 
 def _end_default_message(start_value, end: str | None) -> str | None:
-    """Self-teaching response helper (PHILOSOPHY §5).
-
-    When the agent calls `create_event` with only a `start` and no
-    `end`, the .ics layer applies a default duration (see
-    `ical.default_dtend` — the single source of truth for both the
-    persisted value and this disclosure). The tool response names that
-    duration so the agent can learn from the call and remember for
-    next time. Returns `None` when `end` was given — no default to
-    disclose. The message is built from the value the helper produced,
-    not from a hard-coded phrase, so the response and the persisted
-    value can never disagree (issue #7).
+    """Self-teaching helper: returns the disclosure message naming the
+    default duration `ical.default_dtend` will apply when `end` is
+    omitted, or `None` when `end` was given.
     """
     if end is not None:
         return None
@@ -146,6 +133,42 @@ def _end_default_message(start_value, end: str | None) -> str | None:
     suffix = " (all-day)" if is_all_day else ""
     return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
 
+
+# Module-level zone + default-duration strings baked into parameter
+# descriptions at import time. `CAL_DEFAULT_TZ` is read here, not via
+# `Config.from_env`, so the server can still start before CalDAV is wired.
+_ZONE = os.environ.get("CAL_DEFAULT_TZ", "Pacific/Auckland").strip() or "Pacific/Auckland"
+_TIMED_DEFAULT, _ALL_DAY_DEFAULT = ical.default_durations()
+_TIMED_DEFAULT_PHRASE = _humanize_timedelta(_TIMED_DEFAULT)
+_ALL_DAY_DEFAULT_PHRASE = _humanize_timedelta(_ALL_DAY_DEFAULT)
+
+_START_DESC = (
+    f"ISO 8601 datetime. A bare local time is interpreted as wall "
+    f"time in the configured zone (`{_ZONE}`); an offset-qualified "
+    f"time is honoured and stored in that zone. Use "
+    f"`resolve_datetime` to confirm before writing. With no `end`, "
+    f"the event defaults to {_TIMED_DEFAULT_PHRASE} after this "
+    f"`start` ({_ALL_DAY_DEFAULT_PHRASE} for all-day)."
+)
+_END_DESC = (
+    f"ISO 8601 datetime. Omit for the default duration: "
+    f"{_TIMED_DEFAULT_PHRASE} after `start` for timed events, "
+    f"{_ALL_DAY_DEFAULT_PHRASE} after `start` for all-day. Must be "
+    f"after `start`."
+)
+_UPDATE_START_DESC = (
+    f"ISO 8601 datetime. A bare local time is interpreted as wall "
+    f"time in the configured zone (`{_ZONE}`); an offset-qualified "
+    f"time is honoured and stored in that zone. Use "
+    f"`resolve_datetime` to confirm before writing. If `end` is "
+    f"omitted, the existing duration is kept."
+)
+_MOVE_NEW_START_DESC = (
+    f"ISO 8601 datetime. A bare local time is interpreted as wall "
+    f"time in the configured zone (`{_ZONE}`); an offset-qualified "
+    f"time is honoured and stored in that zone. Use "
+    f"`resolve_datetime` to confirm before writing."
+)
 
 # ── calendars ─────────────────────────────────────────────────────────────────
 
@@ -193,10 +216,10 @@ def list_events(start: str, end: str, calendar: str | None = None) -> dict:
     occs = []
     for raw in _store().search_raw(cal_name, lo_dt, hi_dt):
         cal = ical.parse(raw)
-        # Derive `recurring` from the *source* master VEVENT, not the
+        # Derive `recurring` from the source master VEVENT, not the
         # expanded occurrence. `recurring_ical_events` adds a RECURRENCE-ID
         # to every expansion (including one-off events) — see
-        # ical.occurrence_dict's docstring / issue #8. The master is the
+        # `ical.occurrence_dict` for why. The master is the
         # VEVENT without a RECURRENCE-ID; it has RRULE iff the source is
         # a series.
         is_recurring = "RRULE" in ical.master(cal)
@@ -222,8 +245,8 @@ def resolve_datetime(value: str) -> dict:
 @mcp.tool()
 def create_event(
     summary: str,
-    start: str,
-    end: str | None = None,
+    start: Annotated[str, Field(description=_START_DESC)],
+    end: Annotated[str | None, Field(description=_END_DESC)] = None,
     calendar: str | None = None,
     description: str | None = None,
     location: str | None = None,
@@ -231,13 +254,11 @@ def create_event(
 ) -> dict:
     """Create an event (single, or recurring if `rrule` is given).
 
-    `start`/`end` are ISO 8601. A bare local time is interpreted as wall time in
-    the calendar's configured zone (see `resolve_datetime` to confirm before
-    writing); an offset-qualified time is honoured and stored in that zone. With
-    no `end`, the event defaults to 1 hour (all-day if `start` is date-only).
-    `rrule` is a raw RRULE body, e.g. "FREQ=WEEKLY;COUNT=12". `calendar` is
-    required in practice — there is no default calendar. Pick deliberately;
-    events are not validated against calendar type.
+    `start`/`end` are ISO 8601 (see parameter docs for zone + default-duration
+    details — read those before writing). `rrule` is a raw RRULE body,
+    e.g. "FREQ=WEEKLY;COUNT=12". `calendar` is required in practice — there
+    is no default calendar. Pick deliberately; events are not validated
+    against calendar type.
     """
     cal_name = _require_known_calendar(calendar)
     rs = _resolve_dt(start)
@@ -277,7 +298,7 @@ def update_event(
     uid: str,
     calendar: str | None = None,
     summary: str | None = None,
-    start: str | None = None,
+    start: Annotated[str | None, Field(description=_UPDATE_START_DESC)] = None,
     end: str | None = None,
     description: str | None = None,
     location: str | None = None,
@@ -404,7 +425,7 @@ def exclude_occurrence(uid: str, occurrence: str, calendar: str | None = None) -
 def move_occurrence(
     uid: str,
     occurrence: str,
-    new_start: str,
+    new_start: Annotated[str, Field(description=_MOVE_NEW_START_DESC)],
     new_end: str | None = None,
     calendar: str | None = None,
 ) -> dict:

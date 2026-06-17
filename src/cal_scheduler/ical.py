@@ -66,26 +66,24 @@ def new_uid() -> str:
     return f"{uuid.uuid4()}@cal-scheduler"
 
 
-# Single source of truth for the default end-time applied when the caller
-# omits `end`. Both `build_event` (which persists) and the tool layer (which
-# discloses the value in the response — PHILOSOPHY §5) go through this. If
-# the default ever changes, both the persisted value and the self-teaching
-# message move together. Issue #7.
+# Single source of truth for the default end-time applied when `end` is
+# omitted. Both `build_event` (which persists) and the tool-layer disclosure
+# go through this, so the persisted value and the disclosure message cannot
+# drift if the default ever changes.
 _DEFAULT_TIMED_DTEND = timedelta(hours=1)
 _DEFAULT_ALL_DAY_DTEND = timedelta(days=1)  # DTEND is exclusive for all-day
 
 
 def default_dtend(dtstart: datetime | date) -> datetime | date:
-    """The `dtend` `build_event` applies when the caller omits one.
-
-    Timed dtstart → dtstart + 1h. All-day dtstart (a `date`, not a
-    `datetime`) → dtstart + 1d. This is the value the .ics layer
-    persists; the tool-layer disclosure builds its self-teaching message
-    from this same value, so the two cannot drift.
-    """
+    """`dtend` applied when the caller omits it: timed → +1h, all-day → +1d."""
     if isinstance(dtstart, datetime):
         return dtstart + _DEFAULT_TIMED_DTEND
     return dtstart + _DEFAULT_ALL_DAY_DTEND
+
+
+def default_durations() -> tuple[timedelta, timedelta]:
+    """`(timed_default, all_day_default)` from the same single source of truth."""
+    return (_DEFAULT_TIMED_DTEND, _DEFAULT_ALL_DAY_DTEND)
 
 
 # ── recurrence validation ─────────────────────────────────────────────────────
@@ -394,17 +392,14 @@ def count_series(
 def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
     """Serialise one expanded occurrence into the agent-facing dict.
 
-    `recurring` is the single-source-of-truth for the `recurring` flag — the
-    caller derives it from the *source* calendar's master VEVENT (it has
-    `RRULE` iff the source is a series) and passes it in.
+    `recurring` is the source of truth for the `recurring` flag — the
+    caller derives it from the source calendar's master VEVENT (RRULE
+    iff series) and passes it in.
 
-    Do NOT derive `recurring` from the occurrence itself: `recurring_ical_events`
-    adds a `RECURRENCE-ID` to *every* expansion, including one-off events
-    (where the library pins the RECURRENCE-ID to the same time as DTSTART,
-    which is semantically meaningless). The earlier `if "rrule" in occ or
-    "recurrence-id" in occ` check therefore leaked `"recurring": true` onto
-    one-off events and broke the agent's single- vs series-edit decision.
-    See eval 20260612-232740 §5 / issue #8.
+    Do NOT derive `recurring` from the occurrence itself: the expansion
+    library stamps a `RECURRENCE-ID` on every expansion including
+    one-off events, which would leak `"recurring": true` and break the
+    agent's single- vs series-edit decision.
     """
     start = occ.start
     end = occ.end
