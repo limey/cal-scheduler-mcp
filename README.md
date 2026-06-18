@@ -41,9 +41,8 @@ spawns as a subprocess.
 
 ## Install
 
-Requires Python ≥ 3.11. The package is not yet on PyPI;
-install from a clone until the first release ships (the repo
-is private — `gh repo clone` needs your GitHub auth).
+Requires Python ≥ 3.11. The package is not yet on PyPI; install
+from a clone of this repo.
 
 ```bash
 # run straight from the repo with uv (no global install)
@@ -54,14 +53,6 @@ gh repo clone limey/cal-scheduler-mcp
 uv tool install /path/to/cal-scheduler-mcp
 # or, with SSH GitHub access, in one step:
 uv tool install git+ssh://git@github.com/limey/cal-scheduler-mcp
-```
-
-Once the package is published:
-
-```bash
-uv tool install cal-scheduler
-# or
-pip install cal-scheduler
 ```
 
 > Don't `uv add cal-scheduler` for the MCP — `uv add` writes
@@ -108,9 +99,7 @@ host's `PATH`:
 ```
 
 `/abs/path/to/cal-scheduler-mcp` is the absolute path to a local clone of
-this repo (see *Install* above). For a post-release install, point the same
-argument at the package install directory — find it with
-`pip show cal-scheduler`.
+this repo (see *Install* above).
 
 Pair it with any CalDAV server. A simple self-hosted option is
 [Radicale](https://radicale.org/) (plain `http://`, no TLS needed for local use).

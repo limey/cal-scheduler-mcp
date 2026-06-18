@@ -46,13 +46,8 @@ Skip `cal-scheduler` and look elsewhere when:
 
 ## Install
 
-The package is **not yet on PyPI.** Use the pre-release path
-below. `uv tool install cal-scheduler` and `pip install
-cal-scheduler` will work once it ships; the `uv add` warning
-below stays valid either way.
-
-Pre-release (the repo is private — `gh repo clone` needs your
-GitHub auth):
+The package is **not yet on PyPI.** Install from a clone of
+this repo:
 
 ```bash
 gh repo clone limey/cal-scheduler-mcp
@@ -68,18 +63,6 @@ uv tool install git+ssh://git@github.com/limey/cal-scheduler-mcp
 > agent is sitting in, not the MCP install. Use the isolated
 > `uv tool install` above. Reserve `uv add` for embedding
 > `cal_scheduler` as a library.
-
-Post-release:
-
-```bash
-uv tool install cal-scheduler
-# or
-pip install cal-scheduler
-```
-
-The `cal-scheduler` console script and the `cal_scheduler`
-Python module are both installed. Pin to a specific version
-for reproducible installs.
 
 ## Wire
 
@@ -122,13 +105,6 @@ block names the required field plus the most commonly-set
 optionals; the full field spec is in *Configuration* below.
 `CALDAV_PASSWORD` is a placeholder — see the *Configuration*
 callout for the `auth=none` case.
-
-**Current state (dev install, pre-PyPI)** is the wiring
-above. **Future state (PyPI):** once the package is
-published, the same form still works (point
-`/abs/path/to/cal-scheduler-mcp` at the install location —
-find it with `pip show cal-scheduler`); the field set stays
-as in *Configuration* below.
 
 ## Configuration
 
