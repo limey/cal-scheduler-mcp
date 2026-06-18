@@ -1,0 +1,66 @@
+name: Bug report
+description: Tell us something is broken.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. A short, focused report helps us fix it
+        faster. Delete any section that does not apply.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: |
+        The smallest steps that reproduce the failure.
+        MCP tool calls (or `cal-scheduler` CLI invocations), with the exact
+        arguments used.
+      placeholder: |
+        1. Call `list_events` with ...
+        2. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: |
+        What happened instead. Include the tool response,
+        error message, or `.ics` excerpt if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        `cal-scheduler --version` (or the commit you built from),
+        Python version, CalDAV server (Radicale / Nextcloud / other),
+        and the OS the host runs on.
+      placeholder: |
+        - cal-scheduler: 0.1.0
+        - Python: 3.12.3
+        - CalDAV server: Radicale 3.2.3 (auth=none)
+        - OS: macOS 14.4
+    validations:
+      required: false
