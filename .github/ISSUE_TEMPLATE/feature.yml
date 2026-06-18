@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose a change to the MCP surface, behaviour, or docs.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A focused proposal is easier to act on. If the change is large,
+        consider opening a discussion first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: |
+        The user need or limitation this addresses. What is hard or
+        impossible today. One paragraph is usually enough.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: |
+        The change as you imagine it -- tool signatures, new config
+        fields, doc updates. Concrete enough to sketch, light enough
+        to discuss.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Other shapes that were considered and why this one is
+        preferred. Skip if the choice is obvious.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Touches
+      description: Which surfaces does this change. Check all that apply.
+      options:
+        - label: MCP tool surface
+        - label: Configuration / env contract
+        - label: Documentation (AGENTS.md, README.md, PHILOSOPHY.md)
+        - label: Tests
+        - label: Other (describe in the proposal)
+    validations:
+      required: true
