@@ -44,3 +44,9 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.11.22,<0.12.0"]
 build-backend = "uv_build"
+
+# Distribution name (`cal-scheduler-mcp`) and import module (`cal_scheduler`)
+# are intentionally distinct. uv_build's default layout would look for
+# `src/cal_scheduler_mcp/`, but the source tree is at `src/cal_scheduler/`.
+[tool.uv.build-backend]
+module-name = "cal_scheduler"
