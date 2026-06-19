@@ -1,6 +1,6 @@
 [project]
-name = "cal-scheduler"
-version = "0.1.0a1"
+name = "cal-scheduler-mcp"
+version = "0.1.0a2"
 description = "A timezone-correct CalDAV scheduling MCP server (zoned .ics, validated recurrence, single-occurrence edits)."
 readme = "README.md"
 license = "MIT"
