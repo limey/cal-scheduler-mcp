@@ -168,8 +168,7 @@ After install + configure, a minimal round-trip:
    `list_calendars` — confirms the create round-trips.
 3. `create_event` with a `summary`, a `start`, and a `calendar` —
    should return a 1h event in the configured zone and surface
-   the default in the response (this is the self-teaching
-   response; see `PHILOSOPHY.md` §5). `calendar` is required in
+   the default in the response. `calendar` is required in
    practice (no default calendar) and must name an existing
    calendar — a typo is rejected with the same PCD-style error
    the read path uses, naming the valid values inline.
@@ -185,8 +184,8 @@ tool call is the diagnostic.
 
 ## Deliberate reductions (read once, internalise)
 
-From `PHILOSOPHY.md` §4 and §6, the design reductions that
-shape this MCP's surface. They are deliberate, not gaps:
+The design reductions that shape this MCP's surface. They are
+deliberate, not gaps:
 
 - **One account, one timezone.** Multi-account and
   multi-timezone reconciliation are out of scope.
@@ -218,8 +217,6 @@ implementation matches it as of the version you install:
 
 ## Pointers
 
-- `PHILOSOPHY.md` — the *why* (design pillars, deliberate
-  reductions, the PCD contract, Chronos provenance).
 - `README.md` — the *what* for humans.
 - `pyproject.toml` — install coordinates and dependency floor.
 - `tests/` — the test suite. `uv run pytest -q` runs it; no
