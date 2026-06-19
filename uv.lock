@@ -40,8 +40,8 @@ wheels = [
 ]
 
 [[package]]
-name = "cal-scheduler"
-version = "0.1.0"
+name = "cal-scheduler-mcp"
+version = "0.1.0a2"
 source = { editable = "." }
 dependencies = [
     { name = "caldav" },
