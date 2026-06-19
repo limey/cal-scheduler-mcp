@@ -1,0 +1,65 @@
+name: Publish
+
+# Stage C.1: Trusted Publishing to TestPyPI.
+#
+# Triggered by pushing a tag whose name starts with `v` (e.g. `v0.1.0a1`).
+# The tag's `v`-stripped name MUST match the `version` field in
+# pyproject.toml — the workflow asserts that before building. Authentication
+# to TestPyPI uses PyPI's Trusted Publishing (OIDC) — no API token is stored
+# as a repository or environment secret. Real PyPI is a later stage and is
+# not configured here.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish to TestPyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # PyPI Trusted Publishing (OIDC)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: '3.12'
+
+      - name: Verify tag matches pyproject version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg_version="$(grep -E '^version' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "$tag" != "$pkg_version" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' (version '$tag') does not match pyproject.toml version '$pkg_version'."
+            echo "Update pyproject.toml to '$tag' (or move the tag) and re-push before publishing."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches package version ${pkg_version}."
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.ref_name }}
+          path: dist/
+          retention-days: 7
