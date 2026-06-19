@@ -30,3 +30,16 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+  # Single stable check to require in the branch ruleset. The matrix above emits
+  # per-version contexts (test (3.11), ...) that change whenever the matrix
+  # changes; this aggregate gate does not, so the required check never drifts.
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify matrix succeeded
+        run: |
+          [ "${{ needs.test.result }}" = "success" ] || exit 1
