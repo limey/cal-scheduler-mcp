@@ -38,7 +38,7 @@ cal-scheduler = "cal_scheduler:main"
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
-    "ruff>=0.15.0",
+    "ruff>=0.15.18",
 ]
 
 [build-system]
