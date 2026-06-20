@@ -1,3 +1,5 @@
+**If you are an agent installing this MCP, read [AGENTS.md](./AGENTS.md) first.**
+
 # cal-scheduler
 
 A thin, **timezone-correct** [MCP](https://modelcontextprotocol.io) server for
