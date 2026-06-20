@@ -46,17 +46,26 @@ Skip `cal-scheduler` and look elsewhere when:
 
 ## Install
 
-The package is **not yet on PyPI.** Install from a clone of
-this repo:
+The package is on PyPI as `cal-scheduler-mcp`. The canonical
+install is `uv tool install`:
+
+```bash
+uv tool install cal-scheduler-mcp
+```
+
+(or `pip install cal-scheduler-mcp`, `uvx --from cal-scheduler-mcp cal-scheduler`,
+etc.)
+
+For editable dev work, install from a clone:
 
 ```bash
 gh repo clone limey/cal-scheduler-mcp
-uv tool install /path/to/cal-scheduler-mcp
+uv tool install --editable /path/to/cal-scheduler-mcp
 # or, with SSH GitHub access, in one step:
 uv tool install git+ssh://git@github.com/limey/cal-scheduler-mcp
 ```
 
-> **`uv add` is the wrong tool here.** `uv add cal-scheduler`
+> **`uv add` is the wrong tool here.** `uv add cal-scheduler-mcp`
 > writes the dependency into the *current directory's*
 > `pyproject.toml` — for an MCP server (a spawned subprocess,
 > not an embedded library) that mutates whichever project the

@@ -1,4 +1,4 @@
-**If you are an agent installing this MCP, read [AGENTS.md](./AGENTS.md) first.**
+**If you are an agent installing this MCP, read [AGENTS.md](https://github.com/limey/cal-scheduler-mcp/blob/main/AGENTS.md) first.**
 
 # cal-scheduler
 
@@ -43,21 +43,30 @@ spawns as a subprocess.
 
 ## Install
 
-Requires Python ≥ 3.11. The package is not yet on PyPI; install
-from a clone of this repo.
+Requires Python ≥ 3.11. The package is on PyPI as
+`cal-scheduler-mcp`:
+
+```bash
+uv tool install cal-scheduler-mcp
+```
+
+(or `pip install cal-scheduler-mcp`, `uvx --from cal-scheduler-mcp cal-scheduler`,
+etc.)
+
+For editable dev work, install from a clone:
 
 ```bash
 # run straight from the repo with uv (no global install)
-uv run cal-scheduler
+uv run --directory /path/to/cal-scheduler-mcp cal-scheduler
 
 # or install the console script into a tool environment
 gh repo clone limey/cal-scheduler-mcp
-uv tool install /path/to/cal-scheduler-mcp
+uv tool install --editable /path/to/cal-scheduler-mcp
 # or, with SSH GitHub access, in one step:
 uv tool install git+ssh://git@github.com/limey/cal-scheduler-mcp
 ```
 
-> Don't `uv add cal-scheduler` for the MCP — `uv add` writes
+> Don't `uv add cal-scheduler-mcp` for the MCP — `uv add` writes
 > into whatever project you're sitting in, not into the tool
 > environment. For an MCP server (spawned as a subprocess),
 > `uv tool install` is the right shape.
@@ -143,4 +152,4 @@ the full stack end to end, point `CALDAV_BASE_URL` at a throwaway CalDAV account
 
 ## License
 
-[MIT](LICENSE) © 2026 Robert Clark
+[MIT](https://github.com/limey/cal-scheduler-mcp/blob/main/LICENSE) © 2026 Robert Clark
