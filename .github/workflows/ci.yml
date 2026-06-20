@@ -31,15 +31,34 @@ jobs:
       - name: Test
         run: uv run pytest -q
 
+  # The project version lives in three places (pyproject.toml, uv.lock,
+  # server.json). This check refuses any PR where they disagree, so a release
+  # bump can't ship with one of them out of sync. Stdlib only (tomllib/json),
+  # Python 3.11+ — same floor as the project's requires-python.
+  version-alignment:
+    name: version-alignment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify versions align
+        run: python scripts/check_version_alignment.py
+
   # Single stable check to require in the branch ruleset. The matrix above emits
   # per-version contexts (test (3.11), ...) that change whenever the matrix
   # changes; this aggregate gate does not, so the required check never drifts.
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [test]
+    needs: [test, version-alignment]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify matrix succeeded
+      - name: Verify upstream checks succeeded
         run: |
           [ "${{ needs.test.result }}" = "success" ] || exit 1
+          [ "${{ needs.version-alignment.result }}" = "success" ] || exit 1
