@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["mcp", "caldav", "calendar", "scheduling", "ical", "icalendar", "timezone"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Other Audience",
     "License :: OSI Approved :: MIT License",
