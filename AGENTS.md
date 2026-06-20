@@ -106,7 +106,7 @@ optionals; the full field spec is in *Configuration* below.
 `CALDAV_PASSWORD` is a placeholder — see the *Configuration*
 callout for the `auth=none` case.
 
-## Configuration
+## Configuration — field spec
 
 The configuration field spec. **Single source of truth:**
 [`config.py`](src/cal_scheduler/config.py) `SCHEMA` tuple —
@@ -128,7 +128,7 @@ validation round-trip after wiring, see *Validate* below.
 
 > **Radicale `auth=none` (and other username-routed servers):** set a non-empty placeholder password (e.g. `x`). The caldav client only sends a Basic auth header when `CALDAV_PASSWORD` is set, and the username in that header is how the server routes to `/<username>/`. An empty password means no header is sent, and routing fails with what looks like an auth error.
 
-## Configure
+## Configuring — the flow
 
 There is no `configure` tool and no preflight tool — by
 design the MCP never persists, and the doc is the advisor
@@ -141,7 +141,7 @@ needs a setting the agent hasn't wired in, the call fails
 with a caller-actionable error that points at the field name
 and hints at the fix. The full field spec — names, defaults,
 required-ness, examples, and "what goes wrong if wrong" — is
-in the *Configuration* section above.
+in the *Configuration — field spec* section above.
 
 The flow:
 
