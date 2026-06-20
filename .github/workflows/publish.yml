@@ -1,13 +1,12 @@
 name: Publish
 
-# Stage C.1: Trusted Publishing to TestPyPI.
+# Trusted Publishing to PyPI.
 #
-# Triggered by pushing a tag whose name starts with `v` (e.g. `v0.1.0a1`).
+# Triggered by pushing a tag whose name starts with `v` (e.g. `v1.0.0a1`).
 # The tag's `v`-stripped name MUST match the `version` field in
 # pyproject.toml — the workflow asserts that before building. Authentication
-# to TestPyPI uses PyPI's Trusted Publishing (OIDC) — no API token is stored
-# as a repository or environment secret. Real PyPI is a later stage and is
-# not configured here.
+# uses PyPI Trusted Publishing (OIDC) — no API token is stored as a
+# repository or environment secret.
 
 on:
   push:
@@ -20,7 +19,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Build and publish to TestPyPI
+    name: Build and publish to PyPI
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,10 +49,10 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
-      - name: Publish to TestPyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
+          repository-url: https://upload.pypi.org/legacy/
           skip-existing: true
 
       - name: Upload build artifacts
