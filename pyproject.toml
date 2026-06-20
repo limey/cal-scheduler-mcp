@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-    { name = "Robert Clark" }
+    { name = "Robert Clark", email = "limey@users.noreply.github.com" }
 ]
 keywords = ["mcp", "caldav", "calendar", "scheduling", "ical", "icalendar", "timezone"]
 classifiers = [
