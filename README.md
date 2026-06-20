@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.limey/cal-scheduler-mcp -->
+
 **If you are an agent installing this MCP, read [AGENTS.md](https://github.com/limey/cal-scheduler-mcp/blob/main/AGENTS.md) first.**
 
 # cal-scheduler
