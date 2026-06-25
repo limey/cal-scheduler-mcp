@@ -222,9 +222,14 @@ def list_events(start: str, end: str, calendar: str | None = None) -> dict:
         # `ical.occurrence_dict` for why. The master is the
         # VEVENT without a RECURRENCE-ID; it has RRULE iff the source is
         # a series.
-        is_recurring = "RRULE" in ical.master(cal)
-        for occ in recurring_ical_events.of(cal).between(lo_dt, hi_dt):
-            occs.append(ical.occurrence_dict(occ, recurring=is_recurring))
+        master_ev = ical.master(cal)
+        is_recurring = "RRULE" in master_ev
+        expanded = list(recurring_ical_events.of(cal).between(lo_dt, hi_dt))
+        done_map = ical.done_at_for_occurrences(cal, expanded)
+        for i, occ in enumerate(expanded):
+            occs.append(ical.occurrence_dict(
+                occ, recurring=is_recurring, done_at=done_map.get(i),
+            ))
     occs.sort(key=lambda e: e["start"])
     return {"calendar": cal_name, "count": len(occs), "events": occs}
 
@@ -392,6 +397,82 @@ def delete_event(uid: str, calendar: str | None = None) -> dict:
     cal_name = _require_calendar(calendar)
     _store().delete_event(cal_name, uid)
     return {"ok": True, "deleted": uid, "calendar": cal_name}
+
+
+@mcp.tool()
+def mark_done(
+    uid: str,
+    calendar: str | None = None,
+    occurrence: str | None = None,
+    done: bool = True,
+) -> dict:
+    """Tag an event (or one occurrence) done via a custom X- property.
+
+    Without `occurrence`: marks the whole series done (X- on master). With
+    `occurrence`: marks that one instance done (X- on a RECURRENCE-ID override).
+    `done=False` removes the marker — if the override existed only to carry the
+    marker, it is deleted entirely. `occurrence` is the instance's current start
+    exactly as returned by `list_events` (UTC offset included). Bare local times
+    may not match. CalDAV `If-Match` rejects concurrent edits; a conflict
+    surfaces as a retryable error rather than a silent clobber.
+    """
+    cal_name = _require_calendar(calendar)
+    store = _store()
+    event = store.fetch_event(cal_name, uid)
+    cal = ical.parse(event.data)
+    master_ev = ical.master(cal)
+    now = _now()
+
+    if occurrence is None:
+        if done:
+            ical.mark_done(master_ev, now)
+        else:
+            ical.clear_done(master_ev)
+        ical.touch(master_ev, now)
+    else:
+        occ = _resolve_dt(occurrence).value
+        existing = ical.override_for_occurrence(cal, occ)
+        if existing is not None:
+            if done:
+                ical.mark_done(existing, now)
+            elif ical.override_is_done_only(existing, master_ev):
+                cal.subcomponents.remove(existing)
+            else:
+                ical.clear_done(existing)
+            ical.touch(master_ev, now)
+        elif done:
+            override = ical.build_done_override(
+                master_ev=master_ev, occurrence=occ, done_at=now,
+            )
+            cal.add_component(override)
+            ical.touch(master_ev, now)
+
+    try:
+        store.write_back(event, ical.serialize(cal))
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "412" in msg or "precondition" in msg:
+            raise ValueError(
+                "event was modified concurrently; re-fetch and retry"
+            ) from exc
+        raise
+
+    # Compute the response's done_at from the post-write calendar state:
+    # master when no occurrence, the matching override (if any) when occurrence.
+    if occurrence is None:
+        final = ical.done_at(ical.master(cal))
+    else:
+        occ = _resolve_dt(occurrence).value
+        ov = ical.override_for_occurrence(cal, occ)
+        final = ical.done_at(ov) if ov is not None else None
+    return {
+        "ok": True,
+        "uid": uid,
+        "calendar": cal_name,
+        "occurrence": occurrence,
+        "done": done,
+        "done_at": final.isoformat() if final is not None else None,
+    }
 
 
 @mcp.tool()

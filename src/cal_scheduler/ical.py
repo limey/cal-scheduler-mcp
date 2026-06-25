@@ -305,6 +305,113 @@ def _opt(ev: Event, key: str) -> str | None:
     return str(ev[key]) if key in ev else None
 
 
+# ── done marker ───────────────────────────────────────────────────────────────
+
+# Single source of truth for the custom X- property name. Both the write
+# path (mark_done / clear_done) and the read path (done_at) route through
+# this so the property cannot drift between stored and parsed values.
+_DONE_PROPERTY = "X-CAL-SCHEDULER-DONE"
+
+_DONE_TIMESTAMP = "%Y%m%dT%H%M%SZ"
+
+
+def mark_done(ev: Event, done_at: datetime) -> None:
+    """Stamp the done marker on a VEVENT (idempotent; replaces any prior stamp)."""
+    clear_done(ev)
+    ev.add(_DONE_PROPERTY, done_at.astimezone(ZoneInfo("UTC")).strftime(_DONE_TIMESTAMP))
+
+
+def clear_done(ev: Event) -> None:
+    """Strip the done marker from a VEVENT (idempotent; no-op when absent)."""
+    if _DONE_PROPERTY in ev:
+        del ev[_DONE_PROPERTY]
+
+
+def done_at(ev: Event) -> datetime | None:
+    """Parsed UTC timestamp on the done marker, or None when not marked."""
+    if _DONE_PROPERTY not in ev:
+        return None
+    raw = str(ev[_DONE_PROPERTY])
+    parsed = datetime.strptime(raw, _DONE_TIMESTAMP).replace(tzinfo=ZoneInfo("UTC"))
+    return parsed
+
+
+def override_for_occurrence(
+    cal: Calendar, occurrence: datetime | date
+) -> Event | None:
+    """The override VEVENT whose RECURRENCE-ID matches `occurrence`, else None."""
+    target = occurrence
+    ev = master(cal)
+    if isinstance(ev.decoded("dtstart"), datetime) and isinstance(target, datetime):
+        target = target.astimezone(ZoneInfo("UTC"))
+    for comp in vevents(cal):
+        if "RECURRENCE-ID" not in comp:
+            continue
+        rid = comp.decoded("recurrence-id")
+        if isinstance(rid, datetime) and isinstance(target, datetime):
+            if rid.astimezone(ZoneInfo("UTC")) == target:
+                return comp
+        elif rid == target:
+            return comp
+    return None
+
+
+def override_is_done_only(comp: Event, master_ev: Event) -> bool:
+    """True when the override carries only the done marker (no real edits).
+
+    A minimal override exists solely to tag one occurrence done — same time,
+    same summary, same description/location as the master, and only the X-
+    added. Removing the X- leaves nothing meaningful, so the whole component
+    can be deleted instead of leaving an empty shell.
+    """
+    if _DONE_PROPERTY not in comp:
+        return False
+    ds = master_ev.decoded("dtstart")
+    if "DTEND" in comp and "DTEND" in master_ev:
+        if comp.decoded("dtend") != master_ev.decoded("dtend"):
+            return False
+    elif "DTEND" in comp and "DTEND" not in master_ev:
+        return False
+    if comp.decoded("dtstart") != ds:
+        return False
+    if str(comp.get("summary", "")) != str(master_ev.get("summary", "")):
+        return False
+    for opt_key in ("description", "location"):
+        if str(comp.get(opt_key, "")) != str(master_ev.get(opt_key, "")):
+            return False
+    return True
+
+
+def build_done_override(
+    *,
+    master_ev: Event,
+    occurrence: datetime | date,
+    done_at: datetime,
+) -> Event:
+    """Build a minimal override that stamps the done marker for one occurrence.
+
+    Mirrors `add_override` (same UID, RECURRENCE-ID = occurrence, master copy)
+    but skips the time move — the override's only purpose is to carry X-.
+    """
+    ds = master_ev.decoded("dtstart")
+    de = master_ev.decoded("dtend") if "DTEND" in master_ev else None
+    if isinstance(ds, datetime) and isinstance(occurrence, datetime):
+        occurrence = occurrence.astimezone(ds.tzinfo)
+    override = build_event(
+        uid=str(master_ev["uid"]),
+        summary=str(master_ev.get("summary", "")),
+        dtstart=ds,
+        dtend=de,
+        now=done_at,
+        description=_opt(master_ev, "description"),
+        location=_opt(master_ev, "location"),
+        sequence=int(master_ev.get("sequence", 0)) + 1,
+    )
+    override.add("recurrence-id", occurrence)
+    mark_done(override, done_at)
+    return override
+
+
 # ── expansion / serialisation for reads ───────────────────────────────────────
 
 
@@ -354,6 +461,65 @@ def dropped_on_reanchor(
     return max(count, 0)
 
 
+def done_at_for_occurrences(
+    cal: Calendar, expanded: list
+) -> dict[int, datetime | None]:
+    """Map each expanded occurrence index to its done marker (or None).
+
+    `expanded` is the list returned by `recurring_ical_events.of(cal).between(...)`.
+    The map is keyed by the occurrence's position in that list — keys are stable
+    even when the same start time appears multiple times in a series (e.g. after
+    a move).
+
+    Done marker lookup priority per occurrence:
+    1. Override VEVENT whose RECURRENCE-ID matches the occurrence's original
+       (pre-move) start.
+    2. Else the master VEVENT's done marker (whole-series mark).
+    """
+    import recurring_ical_events
+    from copy import deepcopy
+
+    master_ev = master(cal)
+    master_done = done_at(master_ev)
+
+    # Re-expand the master alone (no overrides) to recover each occurrence's
+    # original start. An expanded occurrence from the full calendar carries
+    # the post-move start; pairing by index gives the original.
+    master_only = new_calendar()
+    master_only.add_component(deepcopy(master_ev))
+    if "rrule" in master_ev:
+        originals = [o.start for o in recurring_ical_events.of(master_only).between(
+            master_ev.decoded("dtstart"),
+            master_ev.decoded("dtstart") + _SERIES_HORIZON * 10,
+        )]
+    else:
+        originals = [master_ev.decoded("dtstart")]
+
+    overrides = {
+        comp.decoded("recurrence-id"): done_at(comp)
+        for comp in vevents(cal)
+        if "RECURRENCE-ID" in comp
+    }
+
+    out: dict[int, datetime | None] = {}
+    for i, occ in enumerate(expanded):
+        original = originals[i] if i < len(originals) else occ.start
+        # Normalise the override map's key to UTC for tz-aware comparison.
+        match = None
+        for rid, value in overrides.items():
+            rid_cmp = rid
+            if isinstance(rid, datetime) and isinstance(original, datetime):
+                rid_cmp = rid.astimezone(ZoneInfo("UTC"))
+                original_cmp = original.astimezone(ZoneInfo("UTC"))
+            else:
+                original_cmp = original
+            if rid_cmp == original_cmp:
+                match = value
+                break
+        out[i] = match if match is not None else master_done
+    return out
+
+
 # Horizon for unbounded series in `count_series`. Long enough to cover any
 # realistic finite series; the response field is documented as "over the
 # horizon" for the infinite case so a cold agent reading a count cannot
@@ -389,7 +555,9 @@ def count_series(
     return n, overrides
 
 
-def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
+def occurrence_dict(
+    occ: Event, *, recurring: bool = False, done_at: datetime | None = None
+) -> dict:
     """Serialise one expanded occurrence into the agent-facing dict.
 
     `recurring` is the source of truth for the `recurring` flag — the
@@ -400,6 +568,11 @@ def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
     library stamps a `RECURRENCE-ID` on every expansion including
     one-off events, which would leak `"recurring": true` and break the
     agent's single- vs series-edit decision.
+
+    `done_at` is the parsed UTC timestamp of the done marker on this
+    occurrence (override X- takes priority over master X-); None when
+    not marked. The caller computes it from the master + override pair,
+    not from the expanded occurrence.
     """
     start = occ.start
     end = occ.end
@@ -410,6 +583,7 @@ def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
         "start": start.isoformat(),
         "end": end.isoformat() if end is not None else None,
         "all_day": all_day,
+        "done_at": done_at.isoformat() if done_at is not None else None,
     }
     if "location" in occ:
         out["location"] = str(occ["location"])
