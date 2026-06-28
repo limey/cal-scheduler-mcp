@@ -357,22 +357,23 @@ def override_for_occurrence(
 
 
 def override_is_done_only(comp: Event, master_ev: Event) -> bool:
-    """True when the override carries only the done marker (no real edits).
-
-    A minimal override exists solely to tag one occurrence done — same time,
-    same summary, same description/location as the master, and only the X-
-    added. Removing the X- leaves nothing meaningful, so the whole component
-    can be deleted instead of leaving an empty shell.
-    """
+    """True iff the override carries only the done marker (no time move, all other props match master)."""
     if _DONE_PROPERTY not in comp:
         return False
-    ds = master_ev.decoded("dtstart")
+    if "RECURRENCE-ID" not in comp:
+        return False
+    rid = comp.decoded("recurrence-id")
+    if isinstance(rid, datetime) and isinstance(comp.decoded("dtstart"), datetime):
+        if comp.decoded("dtstart").astimezone(ZoneInfo("UTC")) != rid.astimezone(ZoneInfo("UTC")):
+            return False
+    elif comp.decoded("dtstart") != rid:
+        return False
     if "DTEND" in comp and "DTEND" in master_ev:
-        if comp.decoded("dtend") != master_ev.decoded("dtend"):
+        dur_override = comp.decoded("dtend") - comp.decoded("dtstart")
+        dur_master = master_ev.decoded("dtend") - master_ev.decoded("dtstart")
+        if dur_override != dur_master:
             return False
     elif "DTEND" in comp and "DTEND" not in master_ev:
-        return False
-    if comp.decoded("dtstart") != ds:
         return False
     if str(comp.get("summary", "")) != str(master_ev.get("summary", "")):
         return False
@@ -388,20 +389,25 @@ def build_done_override(
     occurrence: datetime | date,
     done_at: datetime,
 ) -> Event:
-    """Build a minimal override that stamps the done marker for one occurrence.
+    """Build an override that stamps the done marker at one occurrence's time.
 
-    Mirrors `add_override` (same UID, RECURRENCE-ID = occurrence, master copy)
-    but skips the time move — the override's only purpose is to carry X-.
+    DTSTART and RECURRENCE-ID both equal `occurrence`; DTEND shifts by the same delta so duration is preserved.
     """
     ds = master_ev.decoded("dtstart")
     de = master_ev.decoded("dtend") if "DTEND" in master_ev else None
     if isinstance(ds, datetime) and isinstance(occurrence, datetime):
-        occurrence = occurrence.astimezone(ds.tzinfo)
+        occ_tz = occurrence.astimezone(ds.tzinfo)
+        delta = occ_tz - ds
+        new_dtstart = occ_tz
+        new_dtend = de + delta if de is not None else None
+    else:
+        new_dtstart = occurrence
+        new_dtend = de
     override = build_event(
         uid=str(master_ev["uid"]),
         summary=str(master_ev.get("summary", "")),
-        dtstart=ds,
-        dtend=de,
+        dtstart=new_dtstart,
+        dtend=new_dtend,
         now=done_at,
         description=_opt(master_ev, "description"),
         location=_opt(master_ev, "location"),
@@ -464,18 +470,7 @@ def dropped_on_reanchor(
 def done_at_for_occurrences(
     cal: Calendar, expanded: list
 ) -> dict[int, datetime | None]:
-    """Map each expanded occurrence index to its done marker (or None).
-
-    `expanded` is the list returned by `recurring_ical_events.of(cal).between(...)`.
-    The map is keyed by the occurrence's position in that list — keys are stable
-    even when the same start time appears multiple times in a series (e.g. after
-    a move).
-
-    Done marker lookup priority per occurrence:
-    1. Override VEVENT whose RECURRENCE-ID matches the occurrence's original
-       (pre-move) start.
-    2. Else the master VEVENT's done marker (whole-series mark).
-    """
+    """Map each expanded-occurrence index to its done marker; override X- wins, master X- fills the rest, else None."""
     import recurring_ical_events
     from copy import deepcopy
 
@@ -558,22 +553,9 @@ def count_series(
 def occurrence_dict(
     occ: Event, *, recurring: bool = False, done_at: datetime | None = None
 ) -> dict:
-    """Serialise one expanded occurrence into the agent-facing dict.
-
-    `recurring` is the source of truth for the `recurring` flag — the
-    caller derives it from the source calendar's master VEVENT (RRULE
-    iff series) and passes it in.
-
-    Do NOT derive `recurring` from the occurrence itself: the expansion
-    library stamps a `RECURRENCE-ID` on every expansion including
-    one-off events, which would leak `"recurring": true` and break the
-    agent's single- vs series-edit decision.
-
-    `done_at` is the parsed UTC timestamp of the done marker on this
-    occurrence (override X- takes priority over master X-); None when
-    not marked. The caller computes it from the master + override pair,
-    not from the expanded occurrence.
-    """
+    """Serialise one expanded occurrence into the agent-facing dict."""
+    # `recurring` is sourced from the master (RRULE iff series), not the occurrence (which always carries RECURRENCE-ID).
+    # `done_at` precedence: override X- > master X- > None; caller computes it from master + override pair.
     start = occ.start
     end = occ.end
     all_day = isinstance(start, date) and not isinstance(start, datetime)

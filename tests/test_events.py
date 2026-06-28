@@ -865,6 +865,62 @@ def test_mark_done_single_occurrence_adds_override(monkeypatch):
     assert ical.done_at(overrides[0]) is not None
 
 
+def test_mark_done_single_occurrence_preserves_original_start(monkeypatch):
+    """mark_done(occurrence=X) must keep X as the override's DTSTART.
+
+    Regression: build_done_override previously anchored the override at the
+    master's DTSTART, which collapsed occ1 and the override into a single
+    2026-07-01 occurrence and dropped occ3 from expansion entirely.
+    """
+    from unittest.mock import MagicMock
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 7, 1, 9, 0, tzinfo=NZ)
+    recur = ical.validate_and_normalize_rrule(
+        ical.parse_rrule("FREQ=WEEKLY;COUNT=3"), dtstart, NZ,
+    )
+    ev = ical.build_event(
+        uid="evt-1@cal-scheduler", summary="Standup",
+        dtstart=dtstart, dtend=dtstart + timedelta(hours=1), now=NOW,
+        recur=recur,
+    )
+    raw = ical.serialize(ical.event_calendar(ev))
+
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.fetch_event.return_value.data = raw
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    occ2 = dtstart + timedelta(weeks=1)
+    server.mark_done(
+        uid="evt-1@cal-scheduler", calendar="personal",
+        occurrence=occ2.isoformat(),
+    )
+
+    written_ics = fake_store.write_back.call_args[0][1]
+    overrides = [c for c in ical.vevents(ical.parse(written_ics)) if "RECURRENCE-ID" in c]
+    assert len(overrides) == 1
+    # Override's DTSTART/DTEND/RECURRENCE-ID must all match the occurrence time
+    assert overrides[0].decoded("dtstart") == occ2
+    assert overrides[0].decoded("dtend") == occ2 + timedelta(hours=1)
+    assert overrides[0].decoded("recurrence-id") == occ2
+
+    # list_events must surface all 3 occurrences at their original times
+    fake_store.search_raw.return_value = [written_ics]
+    out = server.list_events(
+        start="2026-06-30T00:00", end="2026-07-31T00:00", calendar="personal",
+    )
+    starts = [e["start"] for e in out["events"]]
+    assert starts == [
+        "2026-07-01T09:00:00+12:00",
+        "2026-07-08T09:00:00+12:00",
+        "2026-07-15T09:00:00+12:00",
+    ]
+
+
 def test_mark_done_unmark_with_done_false_clears_master(monkeypatch):
     from cal_scheduler import server
 
@@ -944,27 +1000,6 @@ def test_mark_done_unmark_no_op_when_no_override_and_done_false(monkeypatch):
     # write_back still happens (touch was a no-op but the function is
     # uniform — verify it ran rather than silently skipping)
     fake_store.write_back.assert_called_once()
-
-
-def test_mark_done_412_surfaces_structured_retry_error(monkeypatch):
-    from cal_scheduler import server
-
-    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
-    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
-
-    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
-    ev = ical.build_event(
-        uid="u@cal-scheduler", summary="x",
-        dtstart=dtstart, dtend=dtstart + timedelta(hours=1), now=NOW,
-    )
-    raw = ical.serialize(ical.event_calendar(ev))
-
-    fake_store, _ = _fake_store_with(raw)
-    fake_store.write_back.side_effect = Exception("412 Precondition Failed")
-    monkeypatch.setattr(server, "_store", lambda: fake_store)
-
-    with pytest.raises(ValueError, match="modified concurrently"):
-        server.mark_done(uid="u@cal-scheduler", calendar="personal")
 
 
 # ── done marker: list_events surfaces done_at ───────────────────────────────

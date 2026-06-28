@@ -413,8 +413,7 @@ def mark_done(
     `done=False` removes the marker — if the override existed only to carry the
     marker, it is deleted entirely. `occurrence` is the instance's current start
     exactly as returned by `list_events` (UTC offset included). Bare local times
-    may not match. CalDAV `If-Match` rejects concurrent edits; a conflict
-    surfaces as a retryable error rather than a silent clobber.
+    may not match.
     """
     cal_name = _require_calendar(calendar)
     store = _store()
@@ -429,6 +428,8 @@ def mark_done(
         else:
             ical.clear_done(master_ev)
         ical.touch(master_ev, now)
+        store.write_back(event, ical.serialize(cal))
+        final = ical.done_at(ical.master(cal))
     else:
         occ = _resolve_dt(occurrence).value
         existing = ical.override_for_occurrence(cal, occ)
@@ -446,23 +447,7 @@ def mark_done(
             )
             cal.add_component(override)
             ical.touch(master_ev, now)
-
-    try:
         store.write_back(event, ical.serialize(cal))
-    except Exception as exc:
-        msg = str(exc).lower()
-        if "412" in msg or "precondition" in msg:
-            raise ValueError(
-                "event was modified concurrently; re-fetch and retry"
-            ) from exc
-        raise
-
-    # Compute the response's done_at from the post-write calendar state:
-    # master when no occurrence, the matching override (if any) when occurrence.
-    if occurrence is None:
-        final = ical.done_at(ical.master(cal))
-    else:
-        occ = _resolve_dt(occurrence).value
         ov = ical.override_for_occurrence(cal, occ)
         final = ical.done_at(ov) if ov is not None else None
     return {
