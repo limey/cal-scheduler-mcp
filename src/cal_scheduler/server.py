@@ -10,7 +10,7 @@ so the same input yields the same bytes (handy if the .ics store is kept in git)
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -392,6 +392,54 @@ def delete_event(uid: str, calendar: str | None = None) -> dict:
     cal_name = _require_calendar(calendar)
     _store().delete_event(cal_name, uid)
     return {"ok": True, "deleted": uid, "calendar": cal_name}
+
+
+@mcp.tool()
+def mark_done(
+    uid: str,
+    occurrence: str | None = None,
+    calendar: str | None = None,
+) -> dict:
+    """Mark an event (or one occurrence of a series) done at the current UTC moment.
+
+    `occurrence=None` marks the whole event / series; otherwise marks only that
+    occurrence (via a RECURRENCE-ID override). Idempotent: re-marking replaces
+    the prior timestamp. The response includes `series_remaining` and
+    `overrides` for parity with move_occurrence / exclude_occurrence.
+    """
+    cal_name = _require_calendar(calendar)
+    store = _store()
+    event = store.fetch_event(cal_name, uid)
+    cal = ical.parse(event.data)
+    now = _now()
+
+    occ: datetime | date | None = None
+    if occurrence is not None:
+        occ = _resolve_dt(occurrence).value
+        ical.add_done_override(cal, occurrence=occ, now=now)
+        ical.touch(ical.master(cal), now)
+        scope = "occurrence"
+    else:
+        ical.mark_event_done(cal, now)
+        ical.touch(ical.master(cal), now)
+        scope = "series"
+
+    series_remaining, overrides = ical.count_series(cal)
+    store.write_back(event, ical.serialize(cal))
+
+    result: dict = {
+        "ok": True,
+        "uid": uid,
+        "calendar": cal_name,
+        "done": True,
+        "done_at": now.astimezone(ZoneInfo("UTC")).isoformat(),
+        "scope": scope,
+    }
+    if occ is not None:
+        result["occurrence"] = occ.isoformat()
+        result["series_remaining"] = series_remaining
+        result["overrides"] = overrides
+    return result
 
 
 @mcp.tool()

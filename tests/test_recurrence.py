@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from cal_scheduler.ical import (
-    ValidationError,
     _WEEKDAYS,
+    ValidationError,
     parse_rrule,
     validate_and_normalize_rrule,
 )

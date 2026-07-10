@@ -148,6 +148,7 @@ def test_count_series_infinite_returns_bounded_horizon_count():
 
 def test_move_occurrence_response_includes_series_remaining_and_overrides(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import server
 
     monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
@@ -180,6 +181,7 @@ def test_move_occurrence_response_includes_series_remaining_and_overrides(monkey
 
 def test_move_occurrence_response_with_prior_override(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import server
 
     monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
@@ -213,6 +215,7 @@ def test_move_occurrence_response_with_prior_override(monkeypatch):
 
 def test_exclude_occurrence_response_includes_series_remaining_and_overrides(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import server
 
     monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
@@ -247,6 +250,7 @@ def test_exclude_occurrence_response_includes_series_remaining_and_overrides(mon
 
 def test_exclude_occurrence_response_no_prior_overrides(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import server
 
     monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
@@ -342,6 +346,7 @@ def test_end_default_message_none_when_end_given():
 
 def test_create_event_response_discloses_default_for_timed(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import ical, server
     from cal_scheduler.server import _humanize_timedelta
 
@@ -397,6 +402,7 @@ def test_occurrence_dict_recurring_false_when_flag_false():
 
 def test_list_events_one_off_is_not_recurring(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import server
 
     # Avoid touching the live CalDAV server / reading real env. The store
@@ -433,6 +439,7 @@ def test_list_events_one_off_is_not_recurring(monkeypatch):
 
 def test_list_events_recurring_series_is_recurring(monkeypatch):
     from unittest.mock import MagicMock
+
     from cal_scheduler import server
 
     monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
@@ -558,7 +565,6 @@ def test_create_event_unknown_calendar_raises_with_inline_valid_values(monkeypat
 
 def test_create_event_unknown_calendar_error_matches_list_events_omit_shape(monkeypatch):
     import re
-
     from unittest.mock import MagicMock
 
     from cal_scheduler import server
@@ -610,3 +616,186 @@ def test_create_event_known_calendar_succeeds(monkeypatch):
     # The discovery call happened (guard pre-validates) but the call
     # itself was successful.
     fake_store.calendar_names.assert_called_once()
+
+
+# ── mark_done helpers ────────────────────────────────────────────────────────
+
+
+def test_mark_event_done_stamps_master():
+    """Marking a single event adds DONE_PROPERTY on the master."""
+    ev = ical.build_event(
+        uid="evt-1@cal-scheduler", summary="Standup",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=None, now=NOW,
+    )
+    cal = ical.event_calendar(ev)
+    ical.mark_event_done(cal, NOW)
+    master_ev = ical.master(cal)
+    assert ical.DONE_PROPERTY in master_ev
+
+
+def test_mark_event_done_idempotent():
+    """Re-marking replaces the prior done_at timestamp."""
+    ev = ical.build_event(
+        uid="evt-1@cal-scheduler", summary="Standup",
+        dtstart=datetime(2026, 6, 30, 21, 0, tzinfo=NZ),
+        dtend=None, now=NOW,
+    )
+    cal = ical.event_calendar(ev)
+    later = NOW + timedelta(hours=2)
+    ical.mark_event_done(cal, NOW)
+    ical.mark_event_done(cal, later)
+    master_ev = ical.master(cal)
+    assert ical.DONE_PROPERTY in master_ev
+    done_val = master_ev.decoded(ical.DONE_PROPERTY)
+    if isinstance(done_val, datetime):
+        assert done_val.replace(tzinfo=None) == later.replace(tzinfo=None)
+
+
+def test_mark_event_done_all_day():
+    """Marking an all-day event works (date-based, not datetime)."""
+    ev = ical.build_event(
+        uid="evt-1@cal-scheduler", summary="Holiday",
+        dtstart=date(2026, 12, 25), dtend=None, now=NOW,
+    )
+    cal = ical.event_calendar(ev)
+    ical.mark_event_done(cal, NOW)
+    master_ev = ical.master(cal)
+    assert ical.DONE_PROPERTY in master_ev
+
+
+def test_add_done_override_creates_override_for_one_occurrence():
+    """Marking one occurrence creates a RECURRENCE-ID override with DONE_PROPERTY."""
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    occ = dtstart + timedelta(weeks=1)
+    ical.add_done_override(cal, occurrence=occ, now=NOW)
+    overrides = [c for c in ical.vevents(cal) if "RECURRENCE-ID" in c]
+    assert len(overrides) == 1
+    assert ical.DONE_PROPERTY in overrides[0]
+    assert ical.DONE_PROPERTY not in ical.master(cal)
+
+
+def test_add_done_override_idempotent():
+    """Re-marking same occurrence replaces timestamp; no duplicate overrides."""
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    occ = dtstart + timedelta(weeks=1)
+    later = NOW + timedelta(hours=3)
+    ical.add_done_override(cal, occurrence=occ, now=NOW)
+    ical.add_done_override(cal, occurrence=occ, now=later)
+    overrides = [c for c in ical.vevents(cal) if "RECURRENCE-ID" in c]
+    assert len(overrides) == 1
+    assert ical.DONE_PROPERTY in overrides[0]
+    done_val = overrides[0].decoded(ical.DONE_PROPERTY)
+    if isinstance(done_val, datetime):
+        assert done_val.replace(tzinfo=None) == later.replace(tzinfo=None)
+
+
+def test_add_done_override_on_existing_move_override():
+    """Mark-done on a moved occurrence stamps the existing override."""
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    occ = dtstart + timedelta(weeks=1)
+    ical.add_override(
+        cal, occurrence=occ,
+        new_start=occ + timedelta(hours=2), new_end=None, now=NOW,
+    )
+    assert len([c for c in ical.vevents(cal) if "RECURRENCE-ID" in c]) == 1
+    ical.add_done_override(cal, occurrence=occ, now=NOW)
+    overrides = [c for c in ical.vevents(cal) if "RECURRENCE-ID" in c]
+    assert len(overrides) == 1, "should not create a second override"
+    assert ical.DONE_PROPERTY in overrides[0]
+
+
+def test_add_done_override_all_day():
+    """Mark one occurrence of an all-day recurring series."""
+    cal = _master(dtstart=date(2026, 6, 30), rrule="FREQ=DAILY;COUNT=5")
+    occ = date(2026, 7, 2)
+    ical.add_done_override(cal, occurrence=occ, now=NOW)
+    overrides = [c for c in ical.vevents(cal) if "RECURRENCE-ID" in c]
+    assert len(overrides) == 1
+    assert ical.DONE_PROPERTY in overrides[0]
+
+
+def test_occurrence_dict_surfaces_done_for_master_mark():
+    """list_events expansion surfaces done/done_at when master is marked."""
+    import recurring_ical_events
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    ical.mark_event_done(cal, NOW)
+    ical.touch(ical.master(cal), NOW)
+
+    lo = dtstart
+    hi = dtstart + timedelta(weeks=5)
+    is_recurring = "RRULE" in ical.master(cal)
+    for occ in recurring_ical_events.of(cal).between(lo, hi):
+        d = ical.occurrence_dict(occ, recurring=is_recurring)
+        assert d["done"] is True
+        assert "done_at" in d
+
+
+def test_occurrence_dict_surfaces_done_for_override_mark():
+    """list_events surfaces done/done_at only on the marked occurrence."""
+    import recurring_ical_events
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    marked_occ = dtstart + timedelta(weeks=1)
+    ical.add_done_override(cal, occurrence=marked_occ, now=NOW)
+    ical.touch(ical.master(cal), NOW)
+
+    lo = dtstart
+    hi = dtstart + timedelta(weeks=5)
+    is_recurring = "RRULE" in ical.master(cal)
+    for occ in recurring_ical_events.of(cal).between(lo, hi):
+        d = ical.occurrence_dict(occ, recurring=is_recurring)
+        occ_start = occ.start
+        is_marked = (
+            occ_start.astimezone(NZ) == marked_occ.astimezone(NZ)
+            if isinstance(occ_start, datetime)
+            else occ_start == marked_occ
+        )
+        if is_marked:
+            assert d.get("done") is True, f"expected done on {occ_start}"
+        else:
+            assert "done" not in d, f"unexpected done on {occ_start}"
+
+
+def test_occurrence_dict_no_done_when_not_marked():
+    """Unmarked events have no done/done_at fields in expansion."""
+    import recurring_ical_events
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+
+    lo = dtstart
+    hi = dtstart + timedelta(weeks=5)
+    is_recurring = "RRULE" in ical.master(cal)
+    for occ in recurring_ical_events.of(cal).between(lo, hi):
+        d = ical.occurrence_dict(occ, recurring=is_recurring)
+        assert "done" not in d
+        assert "done_at" not in d
+
+
+def test_override_done_wins_over_master():
+    """When both master and override marked, override done_at surfaces."""
+    import recurring_ical_events
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    ical.mark_event_done(cal, NOW)
+    marked_occ = dtstart + timedelta(weeks=1)
+    override_now = NOW + timedelta(hours=5)
+    ical.add_done_override(cal, occurrence=marked_occ, now=override_now)
+    ical.touch(ical.master(cal), NOW)
+
+    lo = dtstart
+    hi = dtstart + timedelta(weeks=5)
+    is_recurring = "RRULE" in ical.master(cal)
+    for occ in recurring_ical_events.of(cal).between(lo, hi):
+        d = ical.occurrence_dict(occ, recurring=is_recurring)
+        # All occurrences should have done=True (master is marked)
+        assert d["done"] is True
+        assert "done_at" in d

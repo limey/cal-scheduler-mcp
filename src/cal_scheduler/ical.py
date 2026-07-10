@@ -305,6 +305,85 @@ def _opt(ev: Event, key: str) -> str | None:
     return str(ev[key]) if key in ev else None
 
 
+# ── done marker ───────────────────────────────────────────────────────────────
+
+DONE_PROPERTY = "X-CAL-SCHEDULER-DONE"
+"""Custom X- property carrying a UTC datetime when the event is marked done.
+
+RFC 5545 reserves X- for vendor/experimental use; foreign consumers
+must ignore it. Absence means not done; presence = done-at in UTC.
+"""
+
+
+def mark_event_done(cal: Calendar, now: datetime) -> None:
+    """Stamp the master VEVENT done (idempotent — replaces any prior stamp).
+
+    Caller is responsible for calling `touch()` afterward.
+    """
+    ev = master(cal)
+    if DONE_PROPERTY in ev:
+        del ev[DONE_PROPERTY]
+    ev.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+
+
+def add_done_override(
+    cal: Calendar, *, occurrence: datetime | date, now: datetime
+) -> None:
+    """Stamp one occurrence of a recurring series done via a RECURRENCE-ID override.
+
+    Mirrors `add_override` in shape, but the override carries only the done
+    marker — the occurrence's time is unchanged. If an override already
+    exists at this RECURRENCE-ID (e.g. from a prior `move_occurrence`), the
+    marker is stamped on the existing override. Idempotent — re-marking
+    replaces the prior timestamp.
+
+    Caller is responsible for calling `touch()` on the master afterward.
+    """
+    ev = master(cal)
+    ds = ev.decoded("dtstart")
+    # Zone-normalise `occurrence` to the master's zone (same as add_override).
+    if isinstance(ds, datetime) and isinstance(ds.tzinfo, ZoneInfo) and isinstance(
+        occurrence, datetime
+    ):
+        occurrence = occurrence.astimezone(ds.tzinfo)
+
+    # Find an existing override for this RECURRENCE-ID, or build a new one.
+    target = occurrence
+    for comp in vevents(cal):
+        if "RECURRENCE-ID" not in comp:
+            continue
+        rid = comp.decoded("recurrence-id")
+        if isinstance(rid, datetime) and isinstance(target, datetime):
+            if rid.astimezone(ds.tzinfo if isinstance(ds.tzinfo, ZoneInfo) else ZoneInfo("UTC")) == target:
+                # Existing override found — stamp the marker on it.
+                if DONE_PROPERTY in comp:
+                    del comp[DONE_PROPERTY]
+                comp.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+                return
+        elif rid == target:
+            if DONE_PROPERTY in comp:
+                del comp[DONE_PROPERTY]
+            comp.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+            return
+
+    # No existing override — build a minimal one carrying only the done marker.
+    de = ev.decoded("dtend") if "DTEND" in ev else None
+    duration = (de - ds) if de is not None and ds is not None else None
+    override = build_event(
+        uid=str(ev["uid"]),
+        summary=str(ev.get("summary", "")),
+        dtstart=occurrence,
+        dtend=(occurrence + duration) if duration is not None else de,
+        now=now,
+        description=_opt(ev, "description"),
+        location=_opt(ev, "location"),
+        sequence=int(ev.get("sequence", 0)) + 1,
+    )
+    override.add("recurrence-id", occurrence)
+    override.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+    cal.add_component(override)
+
+
 # ── expansion / serialisation for reads ───────────────────────────────────────
 
 
@@ -325,8 +404,9 @@ def dropped_on_reanchor(
     survives the re-anchor as its own component). Returns 0 when the master has no
     RRULE or the anchor didn't move forward. Call BEFORE mutating DTSTART.
     """
-    import recurring_ical_events
     from copy import deepcopy
+
+    import recurring_ical_events
 
     ev = master(cal)
     if "rrule" not in ev:
@@ -417,4 +497,8 @@ def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
         out["description"] = str(occ["description"])
     if recurring:
         out["recurring"] = True
+    if DONE_PROPERTY in occ:
+        done_dt = occ.decoded(DONE_PROPERTY)
+        out["done"] = True
+        out["done_at"] = done_dt.isoformat() if isinstance(done_dt, datetime) else str(done_dt)
     return out
