@@ -618,6 +618,114 @@ def test_create_event_known_calendar_succeeds(monkeypatch):
     fake_store.calendar_names.assert_called_once()
 
 
+# ── mark_done server tests ───────────────────────────────────────────────────
+
+
+def test_mark_done_series_response_includes_done_and_scope(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.mark_done(
+        uid="evt-1@cal-scheduler",
+        calendar="personal",
+    )
+
+    assert result["ok"] is True
+    assert result["done"] is True
+    assert "done_at" in result
+    assert result["scope"] == "series"
+    assert "occurrence" not in result
+    assert result["series_remaining"] == 10
+    assert result["overrides"] == 0
+    fake_store.write_back.assert_called_once()
+
+
+def test_mark_done_occurrence_response_includes_done_and_scope(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    occ = (dtstart + timedelta(weeks=1)).isoformat()
+    result = server.mark_done(
+        uid="evt-1@cal-scheduler",
+        occurrence=occ,
+        calendar="personal",
+    )
+
+    assert result["ok"] is True
+    assert result["done"] is True
+    assert "done_at" in result
+    assert result["scope"] == "occurrence"
+    assert "occurrence" in result
+    assert result["series_remaining"] == 10
+    assert result["overrides"] == 1
+    fake_store.write_back.assert_called_once()
+
+
+def test_mark_done_occurrence_with_prior_override(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    monkeypatch.setenv("CAL_DEFAULT_TZ", "Pacific/Auckland")
+
+    dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
+    cal = _master(dtstart=dtstart)
+    # a prior move_occurrence on a different instance
+    occ_prior = dtstart + timedelta(weeks=1)
+    ical.add_override(
+        cal, occurrence=occ_prior,
+        new_start=occ_prior + timedelta(hours=2), new_end=None, now=NOW,
+    )
+    raw = ical.serialize(cal)
+
+    fake_event = MagicMock()
+    fake_event.data = raw
+    fake_store = MagicMock()
+    fake_store.fetch_event.return_value = fake_event
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    occ = (dtstart + timedelta(weeks=3)).isoformat()
+    result = server.mark_done(
+        uid="evt-1@cal-scheduler",
+        occurrence=occ,
+        calendar="personal",
+    )
+
+    assert result["ok"] is True
+    assert result["scope"] == "occurrence"
+    assert result["overrides"] == 2  # 1 prior move + 1 new done
+    assert result["series_remaining"] == 10
+
+
 # ── mark_done helpers ────────────────────────────────────────────────────────
 
 
@@ -725,7 +833,6 @@ def test_occurrence_dict_surfaces_done_for_master_mark():
     dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
     cal = _master(dtstart=dtstart)
     ical.mark_event_done(cal, NOW)
-    ical.touch(ical.master(cal), NOW)
 
     lo = dtstart
     hi = dtstart + timedelta(weeks=5)
@@ -744,7 +851,6 @@ def test_occurrence_dict_surfaces_done_for_override_mark():
     cal = _master(dtstart=dtstart)
     marked_occ = dtstart + timedelta(weeks=1)
     ical.add_done_override(cal, occurrence=marked_occ, now=NOW)
-    ical.touch(ical.master(cal), NOW)
 
     lo = dtstart
     hi = dtstart + timedelta(weeks=5)
@@ -789,13 +895,34 @@ def test_override_done_wins_over_master():
     marked_occ = dtstart + timedelta(weeks=1)
     override_now = NOW + timedelta(hours=5)
     ical.add_done_override(cal, occurrence=marked_occ, now=override_now)
-    ical.touch(ical.master(cal), NOW)
+
+    expected_override = override_now.astimezone(ZoneInfo("UTC")).isoformat()
+    expected_master = NOW.astimezone(ZoneInfo("UTC")).isoformat()
 
     lo = dtstart
     hi = dtstart + timedelta(weeks=5)
     is_recurring = "RRULE" in ical.master(cal)
     for occ in recurring_ical_events.of(cal).between(lo, hi):
         d = ical.occurrence_dict(occ, recurring=is_recurring)
+        is_marked = (
+            occ.start.astimezone(NZ) == marked_occ.astimezone(NZ)
+            if isinstance(occ.start, datetime)
+            else occ.start == marked_occ
+        )
         # All occurrences should have done=True (master is marked)
         assert d["done"] is True
         assert "done_at" in d
+        if is_marked:
+            # done_at comes from icalendar's .decoded() which may produce
+            # space-separated or T-separated ISO; normalise for comparison.
+            got = d["done_at"].replace(" ", "T")
+            assert got == expected_override, (
+                f"marked occurrence should use override stamp, "
+                f"got {d['done_at']!r}, expected {expected_override!r}"
+            )
+        else:
+            got = d["done_at"].replace(" ", "T")
+            assert got == expected_master, (
+                f"unmarked occurrence should use master stamp, "
+                f"got {d['done_at']!r}, expected {expected_master!r}"
+            )

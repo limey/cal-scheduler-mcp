@@ -417,11 +417,9 @@ def mark_done(
     if occurrence is not None:
         occ = _resolve_dt(occurrence).value
         ical.add_done_override(cal, occurrence=occ, now=now)
-        ical.touch(ical.master(cal), now)
         scope = "occurrence"
     else:
         ical.mark_event_done(cal, now)
-        ical.touch(ical.master(cal), now)
         scope = "series"
 
     series_remaining, overrides = ical.count_series(cal)
@@ -434,11 +432,11 @@ def mark_done(
         "done": True,
         "done_at": now.astimezone(ZoneInfo("UTC")).isoformat(),
         "scope": scope,
+        "series_remaining": series_remaining,
+        "overrides": overrides,
     }
     if occ is not None:
         result["occurrence"] = occ.isoformat()
-        result["series_remaining"] = series_remaining
-        result["overrides"] = overrides
     return result
 
 

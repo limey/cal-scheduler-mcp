@@ -316,14 +316,12 @@ must ignore it. Absence means not done; presence = done-at in UTC.
 
 
 def mark_event_done(cal: Calendar, now: datetime) -> None:
-    """Stamp the master VEVENT done (idempotent — replaces any prior stamp).
-
-    Caller is responsible for calling `touch()` afterward.
-    """
+    """Stamp the master VEVENT done (idempotent — replaces any prior stamp)."""
     ev = master(cal)
     if DONE_PROPERTY in ev:
         del ev[DONE_PROPERTY]
     ev.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+    touch(ev, now)
 
 
 def add_done_override(
@@ -336,8 +334,6 @@ def add_done_override(
     exists at this RECURRENCE-ID (e.g. from a prior `move_occurrence`), the
     marker is stamped on the existing override. Idempotent — re-marking
     replaces the prior timestamp.
-
-    Caller is responsible for calling `touch()` on the master afterward.
     """
     ev = master(cal)
     ds = ev.decoded("dtstart")
@@ -359,11 +355,13 @@ def add_done_override(
                 if DONE_PROPERTY in comp:
                     del comp[DONE_PROPERTY]
                 comp.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+                touch(ev, now)
                 return
         elif rid == target:
             if DONE_PROPERTY in comp:
                 del comp[DONE_PROPERTY]
             comp.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
+            touch(ev, now)
             return
 
     # No existing override — build a minimal one carrying only the done marker.
@@ -382,6 +380,7 @@ def add_done_override(
     override.add("recurrence-id", occurrence)
     override.add(DONE_PROPERTY, now.astimezone(ZoneInfo("UTC")))
     cal.add_component(override)
+    touch(ev, now)
 
 
 # ── expansion / serialisation for reads ───────────────────────────────────────
