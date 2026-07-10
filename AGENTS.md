@@ -20,7 +20,8 @@ Pick `cal-scheduler` when **all** of the following are true:
   series, single-occurrence edits) against a CalDAV account.
 - You can express the operation as one of: list / create /
   update / delete events or calendars, with optional RRULE
-  recurrence and single-occurrence overrides.
+  recurrence, single-occurrence overrides, and mark-done
+  tagging.
 - The user has a single CalDAV account and a single timezone
   they care about (this is by design — see *Deliberate
   reductions* below).
@@ -185,6 +186,8 @@ After install + configure, a minimal round-trip:
    the read round-trips.
 5. `delete_event` (or `delete_calendar`) on the throwaway —
    cleans up.
+6. `mark_done` on a test event — verify the `done` / `done_at`
+   fields appear in the next `list_events` for that event.
 
 If any step fails with a configuration error, the error
 itself names the field — read it against *Configuration*
@@ -218,7 +221,7 @@ implementation matches it as of the version you install:
 
 - `cal-scheduler` console script and `cal_scheduler` Python
   module: present.
-- The 10 core tools (3 calendar + 6 event + 1 datetime
+- The 11 core tools (3 calendar + 7 event + 1 datetime
   helper): present.
 - The configuration field spec (this file's *Configuration*
   section): present, kept in lockstep with `config.py`'s
