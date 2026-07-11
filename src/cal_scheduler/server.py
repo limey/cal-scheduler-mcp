@@ -118,21 +118,6 @@ def _humanize_timedelta(td: timedelta) -> str:
     return " ".join(parts) if parts else "0 seconds"
 
 
-def _end_default_message(start_value, end: str | None) -> str | None:
-    """Self-teaching helper: returns the disclosure message naming the
-    default duration `ical.default_dtend` will apply when `end` is
-    omitted, or `None` when `end` was given.
-    """
-    if end is not None:
-        return None
-    if start_value is None:
-        return None
-    defaulted_end = ical.default_dtend(start_value)
-    duration = defaulted_end - start_value
-    is_all_day = type(start_value) is not datetime
-    suffix = " (all-day)" if is_all_day else ""
-    return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
-
 
 # Module-level zone + default-duration strings baked into parameter
 # descriptions at import time. `CAL_DEFAULT_TZ` is read here, not via
@@ -262,35 +247,74 @@ def create_event(
     """
     cal_name = _require_known_calendar(calendar)
     rs = _resolve_dt(start)
-    notes = [rs.note]
-    dtend = None
+    zone = _zone()
+
+    # Resolve dtend explicitly so we can echo it in the response.
+    end_rs = None
     if end is not None:
-        re_ = _resolve_dt(end)
-        dtend = re_.value
-        if isinstance(rs.value, datetime) != isinstance(dtend, datetime):
+        end_rs = _resolve_dt(end)
+        resolved_dtend = end_rs.value
+        if isinstance(rs.value, datetime) != isinstance(resolved_dtend, datetime):
             raise ValueError("start and end must both be timed or both be all-day dates")
-        if _nonpositive_interval(rs.value, dtend):
+        if _nonpositive_interval(rs.value, resolved_dtend):
             raise ValueError("`end` must be after `start` — omit `end` for a 1-hour default")
-    elif (default_msg := _end_default_message(rs.value, end)) is not None:
-        notes.append(default_msg)
+    else:
+        resolved_dtend = ical.default_dtend(rs.value)
 
     recur = None
     if rrule:
-        recur = ical.validate_and_normalize_rrule(ical.parse_rrule(rrule), rs.value, _zone())
+        recur = ical.validate_and_normalize_rrule(ical.parse_rrule(rrule), rs.value, zone)
 
     uid = ical.new_uid()
     ev = ical.build_event(
         uid=uid,
         summary=summary,
         dtstart=rs.value,
-        dtend=dtend,
+        dtend=resolved_dtend,
         now=_now(),
         description=description,
         location=location,
         recur=recur,
     )
     _store().save_new_event(cal_name, ical.serialize(ical.event_calendar(ev)))
-    return {"ok": True, "uid": uid, "calendar": cal_name, "note": "; ".join(notes)}
+
+    # ── build the self-teaching note ──────────────────────────────────────
+    zone_name = zone.key
+    start_input = start.strip()
+    start_resolved = rs.value.isoformat()
+
+    if rs.is_all_day:
+        start_chain = f"resolved {start_input} (all-day)"
+    elif rs.assumed:
+        start_chain = f"resolved {start_input} → {start_resolved} ({zone_name})"
+    else:
+        start_chain = f"resolved {start_input} → {start_resolved} ({zone_name})"
+
+    end_resolved = resolved_dtend.isoformat()
+    if end is not None:
+        assert end_rs is not None
+        end_input = end.strip()
+        if end_rs.is_all_day:
+            end_chain = f"end {end_resolved} (all-day)"
+        else:
+            end_chain = f"end resolved {end_input} → {end_resolved} ({zone_name})"
+    else:
+        duration = resolved_dtend - rs.value  # type: ignore[operator] — same-type guarantee enforced above
+        duration_str = _humanize_timedelta(duration)
+        end_chain = f"end defaulted to {duration_str} → {end_resolved}"
+
+    note = f"{start_chain}; {end_chain}"
+    result: dict = {
+        "ok": True,
+        "uid": uid,
+        "calendar": cal_name,
+        "start_resolved": start_resolved,
+        "end_resolved": end_resolved,
+        "note": note,
+    }
+    if rrule:
+        result["next_occurrence"] = start_resolved
+    return result
 
 
 @mcp.tool()

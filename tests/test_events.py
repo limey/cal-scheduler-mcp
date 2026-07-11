@@ -290,59 +290,6 @@ def test_humanize_timedelta():
     assert _humanize_timedelta(timedelta(seconds=0)) == "0 seconds"
 
 
-def test_end_default_message_for_timed_names_live_default():
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message, _humanize_timedelta
-
-    start = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
-    end = ical.default_dtend(start)
-    msg = _end_default_message(start, None)
-    assert _humanize_timedelta(end - start) in msg
-
-
-def test_end_default_message_for_all_day_names_live_default():
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message, _humanize_timedelta
-
-    start = date(2026, 6, 30)
-    end = ical.default_dtend(start)
-    msg = _end_default_message(start, None)
-    assert _humanize_timedelta(end - start) in msg
-    assert "all-day" in msg
-
-
-def test_end_default_message_tracks_a_changed_default_for_timed(monkeypatch):
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message
-
-    monkeypatch.setattr(
-        ical, "default_dtend",
-        lambda dt: dt + timedelta(minutes=15),
-    )
-    msg = _end_default_message(datetime(2026, 6, 30, 21, 0, tzinfo=NZ), None)
-    assert "15 minutes" in msg
-    assert "1 hour" not in msg
-
-
-def test_end_default_message_tracks_a_changed_default_for_all_day(monkeypatch):
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message
-
-    monkeypatch.setattr(
-        ical, "default_dtend",
-        lambda dt: dt + timedelta(days=2),
-    )
-    msg = _end_default_message(date(2026, 6, 30), None)
-    assert "2 days" in msg
-    assert "1 day" not in msg
-
-
-def test_end_default_message_none_when_end_given():
-    from cal_scheduler.server import _end_default_message
-    assert _end_default_message(
-        datetime(2026, 6, 30, 21, 0, tzinfo=NZ), "2026-06-30T22:00"
-    ) is None
-
 
 def test_create_event_response_discloses_default_for_timed(monkeypatch):
     from unittest.mock import MagicMock
@@ -616,6 +563,195 @@ def test_create_event_known_calendar_succeeds(monkeypatch):
     # The discovery call happened (guard pre-validates) but the call
     # itself was successful.
     fake_store.calendar_names.assert_called_once()
+
+
+# ── create_event resolved response fields ──────────────────────────────────
+
+
+def test_create_event_start_resolved_bare_local(monkeypatch):
+    """Bare local time → start_resolved carries the resolved offset."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="test", start="2026-07-16T15:00:00", calendar="personal",
+    )
+    assert result["start_resolved"] == "2026-07-16T15:00:00+12:00"
+    assert result["end_resolved"] == "2026-07-16T16:00:00+12:00"
+
+
+def test_create_event_start_resolved_offset_qualified(monkeypatch):
+    """Offset-qualified start → honour and echo the resolved offset."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="test", start="2026-07-16T15:00:00+12:00", calendar="personal",
+    )
+    assert result["start_resolved"] == "2026-07-16T15:00:00+12:00"
+    assert result["end_resolved"] == "2026-07-16T16:00:00+12:00"
+
+
+def test_create_event_all_day_resolved(monkeypatch):
+    """All-day event → start_resolved and end_resolved are dates (no offset)."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="Holiday", start="2026-12-25", calendar="personal",
+    )
+    assert result["start_resolved"] == "2026-12-25"
+    assert result["end_resolved"] == "2026-12-26"
+
+
+def test_create_event_recurring_has_next_occurrence(monkeypatch):
+    """Recurring event → next_occurrence is the first instance (DTSTART)."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="Standup",
+        start="2026-07-16T09:00:00",
+        calendar="personal",
+        rrule="FREQ=WEEKLY;COUNT=4",
+    )
+    assert result["next_occurrence"] == "2026-07-16T09:00:00+12:00"
+    # non-recurring events do NOT get next_occurrence
+    assert "start_resolved" in result
+    assert "end_resolved" in result
+
+
+def test_create_event_single_no_next_occurrence(monkeypatch):
+    """Single (non-recurring) event → no next_occurrence field."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="Dentist", start="2026-07-16T09:00:00", calendar="personal",
+    )
+    assert "next_occurrence" not in result
+
+
+def test_create_event_explicit_end_resolved(monkeypatch):
+    """Explicit end is resolved and echoed in end_resolved."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="Meeting",
+        start="2026-07-16T15:00:00",
+        end="2026-07-16T16:30:00",
+        calendar="personal",
+    )
+    assert result["start_resolved"] == "2026-07-16T15:00:00+12:00"
+    assert result["end_resolved"] == "2026-07-16T16:30:00+12:00"
+
+
+def test_create_event_note_shows_resolution_chain(monkeypatch):
+    """The note field shows the resolution chain for a bare local start."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="test", start="2026-07-16T15:00:00", calendar="personal",
+    )
+    note = result["note"]
+    assert "resolved 2026-07-16T15:00:00 →" in note
+    assert "Pacific/Auckland" in note
+    assert "end defaulted to 1 hour →" in note
+    assert "2026-07-16T16:00:00+12:00" in note
+
+
+def test_create_event_note_all_day(monkeypatch):
+    """All-day note shows (all-day) and default duration."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="Holiday", start="2026-12-25", calendar="personal",
+    )
+    note = result["note"]
+    assert "(all-day)" in note
+    assert "end defaulted to 1 day →" in note
+    assert "2026-12-26" in note
+
+
+def test_create_event_note_explicit_end(monkeypatch):
+    """Note shows end resolution when end is explicitly provided."""
+    from unittest.mock import MagicMock
+
+    from cal_scheduler import server
+
+    monkeypatch.setenv("CALDAV_BASE_URL", "http://test.invalid")
+    fake_store = MagicMock()
+    fake_store.calendar_names.return_value = ["personal"]
+    fake_store.save_new_event.return_value = None
+    monkeypatch.setattr(server, "_store", lambda: fake_store)
+
+    result = server.create_event(
+        summary="Meeting",
+        start="2026-07-16T15:00:00",
+        end="2026-07-16T16:30:00",
+        calendar="personal",
+    )
+    note = result["note"]
+    assert "end resolved 2026-07-16T16:30:00 →" in note
 
 
 # ── mark_done server tests ───────────────────────────────────────────────────
