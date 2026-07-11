@@ -118,21 +118,6 @@ def _humanize_timedelta(td: timedelta) -> str:
     return " ".join(parts) if parts else "0 seconds"
 
 
-def _end_default_message(start_value, end: str | None) -> str | None:
-    """Self-teaching helper: returns the disclosure message naming the
-    default duration `ical.default_dtend` will apply when `end` is
-    omitted, or `None` when `end` was given.
-    """
-    if end is not None:
-        return None
-    if start_value is None:
-        return None
-    defaulted_end = ical.default_dtend(start_value)
-    duration = defaulted_end - start_value
-    is_all_day = type(start_value) is not datetime
-    suffix = " (all-day)" if is_all_day else ""
-    return f"no `end` given; defaulted to {_humanize_timedelta(duration)} after `start`{suffix}"
-
 
 # Module-level zone + default-duration strings baked into parameter
 # descriptions at import time. `CAL_DEFAULT_TZ` is read here, not via

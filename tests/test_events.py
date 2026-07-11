@@ -290,59 +290,6 @@ def test_humanize_timedelta():
     assert _humanize_timedelta(timedelta(seconds=0)) == "0 seconds"
 
 
-def test_end_default_message_for_timed_names_live_default():
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message, _humanize_timedelta
-
-    start = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
-    end = ical.default_dtend(start)
-    msg = _end_default_message(start, None)
-    assert _humanize_timedelta(end - start) in msg
-
-
-def test_end_default_message_for_all_day_names_live_default():
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message, _humanize_timedelta
-
-    start = date(2026, 6, 30)
-    end = ical.default_dtend(start)
-    msg = _end_default_message(start, None)
-    assert _humanize_timedelta(end - start) in msg
-    assert "all-day" in msg
-
-
-def test_end_default_message_tracks_a_changed_default_for_timed(monkeypatch):
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message
-
-    monkeypatch.setattr(
-        ical, "default_dtend",
-        lambda dt: dt + timedelta(minutes=15),
-    )
-    msg = _end_default_message(datetime(2026, 6, 30, 21, 0, tzinfo=NZ), None)
-    assert "15 minutes" in msg
-    assert "1 hour" not in msg
-
-
-def test_end_default_message_tracks_a_changed_default_for_all_day(monkeypatch):
-    from cal_scheduler import ical
-    from cal_scheduler.server import _end_default_message
-
-    monkeypatch.setattr(
-        ical, "default_dtend",
-        lambda dt: dt + timedelta(days=2),
-    )
-    msg = _end_default_message(date(2026, 6, 30), None)
-    assert "2 days" in msg
-    assert "1 day" not in msg
-
-
-def test_end_default_message_none_when_end_given():
-    from cal_scheduler.server import _end_default_message
-    assert _end_default_message(
-        datetime(2026, 6, 30, 21, 0, tzinfo=NZ), "2026-06-30T22:00"
-    ) is None
-
 
 def test_create_event_response_discloses_default_for_timed(monkeypatch):
     from unittest.mock import MagicMock
