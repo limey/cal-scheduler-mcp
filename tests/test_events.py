@@ -866,11 +866,12 @@ def test_occurrence_dict_surfaces_done_for_override_mark():
         if is_marked:
             assert d.get("done") is True, f"expected done on {occ_start}"
         else:
-            assert "done" not in d, f"unexpected done on {occ_start}"
+            assert d["done"] is False, f"unexpected done on {occ_start}"
+            assert d["done_at"] is None, f"unexpected done_at on {occ_start}"
 
 
-def test_occurrence_dict_no_done_when_not_marked():
-    """Unmarked events have no done/done_at fields in expansion."""
+def test_occurrence_dict_done_false_when_not_marked():
+    """Unmarked events have done=False, done_at=None."""
     import recurring_ical_events
 
     dtstart = datetime(2026, 6, 30, 21, 0, tzinfo=NZ)
@@ -881,8 +882,8 @@ def test_occurrence_dict_no_done_when_not_marked():
     is_recurring = "RRULE" in ical.master(cal)
     for occ in recurring_ical_events.of(cal).between(lo, hi):
         d = ical.occurrence_dict(occ, recurring=is_recurring)
-        assert "done" not in d
-        assert "done_at" not in d
+        assert d["done"] is False
+        assert d["done_at"] is None
 
 
 def test_override_done_wins_over_master():
