@@ -489,6 +489,8 @@ def occurrence_dict(occ: Event, *, recurring: bool = False) -> dict:
         "start": start.isoformat(),
         "end": end.isoformat() if end is not None else None,
         "all_day": all_day,
+        "done": False,
+        "done_at": None,
     }
     if "location" in occ:
         out["location"] = str(occ["location"])
