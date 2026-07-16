@@ -1,12 +1,12 @@
 name: Publish
 
-# Trusted Publishing to PyPI.
+# Trusted Publishing to PyPI and MCP Registry.
 #
-# Triggered by pushing a tag whose name starts with `v` (e.g. `v1.0.0a1`).
+# Triggered by pushing a tag whose name starts with `v` (e.g. `v1.0.0`).
 # The tag's `v`-stripped name MUST match the `version` field in
 # pyproject.toml — the workflow asserts that before building. Authentication
-# uses PyPI Trusted Publishing (OIDC) — no API token is stored as a
-# repository or environment secret.
+# uses PyPI Trusted Publishing (OIDC) and MCP Registry OIDC — no API token
+# is stored as a repository or environment secret.
 
 on:
   push:
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Build and publish to PyPI
+    name: Build and publish to PyPI and MCP Registry
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,6 +54,16 @@ jobs:
         with:
           repository-url: https://upload.pypi.org/legacy/
           skip-existing: true
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
 
       - name: Upload build artifacts
         if: always()
