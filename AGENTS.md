@@ -116,6 +116,8 @@ optionals; the full field spec is in *Configuration* below.
 `CALDAV_PASSWORD` is a placeholder — see the *Configuration*
 callout for the `auth=none` case.
 
+> After saving the configuration, your MCP host may need a reload or full session restart before the tools appear.
+
 ## Configuration — field spec
 
 The configuration field spec. **Single source of truth:**
