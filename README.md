@@ -114,6 +114,27 @@ host's `PATH`:
 `/abs/path/to/cal-scheduler-mcp` is the absolute path to a local clone of
 this repo (see *Install* above).
 
+If you installed from PyPI with `uv tool install cal-scheduler-mcp`, use the
+installed shim directly:
+
+```json
+{
+  "mcpServers": {
+    "cal-scheduler": {
+      "command": "/path/to/cal-scheduler",
+      "env": {
+        "CALDAV_BASE_URL": "http://127.0.0.1:5232",
+        "CALDAV_USERNAME": "me",
+        "CALDAV_PASSWORD": "secret",
+        "CAL_DEFAULT_TZ": "Pacific/Auckland"
+      }
+    }
+  }
+}
+```
+
+Find the shim path with `which cal-scheduler` or `uv tool list --show-paths`.
+
 Pair it with any CalDAV server. A simple self-hosted option is
 [Radicale](https://radicale.org/) (plain `http://`, no TLS needed for local use).
 
