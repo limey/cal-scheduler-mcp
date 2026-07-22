@@ -223,8 +223,7 @@ implementation matches it as of the version you install:
 
 - `cal-scheduler` console script and `cal_scheduler` Python
   module: present.
-- The 11 core tools (3 calendar + 7 event + 1 datetime
-  helper): present.
+- The core tools: present.
 - The configuration field spec (this file's *Configuration*
   section): present, kept in lockstep with `config.py`'s
   `SCHEMA` tuple.

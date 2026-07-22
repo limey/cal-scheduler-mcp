@@ -143,7 +143,8 @@ Pair it with any CalDAV server. A simple self-hosted option is
 **Events** — `list_events(start, end, [calendar])`, `create_event(summary, start,
 [end, calendar, description, location, rrule])`, `update_event(uid, …)`,
 `delete_event(uid, [calendar])`, `exclude_occurrence(uid, occurrence, [calendar])`,
-`move_occurrence(uid, occurrence, new_start, [new_end, calendar])`.
+`move_occurrence(uid, occurrence, new_start, [new_end, calendar])`,
+`mark_done(uid, [calendar])` — tag an event done and record the timestamp.
 
 **Calendars** — `list_calendars`, `create_calendar(name)`, `delete_calendar(name)`.
 
