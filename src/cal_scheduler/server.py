@@ -10,7 +10,7 @@ so the same input yields the same bytes (handy if the .ics store is kept in git)
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -42,7 +42,7 @@ def _zone() -> ZoneInfo:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _require_calendar(calendar: str | None) -> str:

@@ -9,6 +9,8 @@ and what callers use), resolved to the underlying collection URL here.
 """
 from __future__ import annotations
 
+import contextlib
+
 import caldav
 
 
@@ -29,10 +31,9 @@ class Store:
         return sorted(self._display_name(c) for c in self._principal.calendars())
 
     def _display_name(self, cal: caldav.Calendar) -> str:
-        try:
+        with contextlib.suppress(Exception):
             return str(cal.get_display_name())
-        except Exception:
-            return str(cal.name)
+        return str(cal.name)
 
     def _resolve(self, name: str) -> caldav.Calendar:
         for c in self._principal.calendars():

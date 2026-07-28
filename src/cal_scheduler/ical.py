@@ -282,10 +282,9 @@ def add_override(
         occurrence = occurrence.astimezone(ds.tzinfo)
 
     uid = str(ev["uid"])
-    if new_end is None:
-        if isinstance(ds, datetime) and "DTEND" in ev:
-            duration = ev.decoded("dtend") - ds
-            new_end = new_start + duration
+    if new_end is None and isinstance(ds, datetime) and "DTEND" in ev:
+        duration = ev.decoded("dtend") - ds
+        new_end = new_start + duration
     override = build_event(
         uid=uid,
         summary=summary or str(ev.get("summary", "")),
