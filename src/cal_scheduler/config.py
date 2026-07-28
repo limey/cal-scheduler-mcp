@@ -89,7 +89,7 @@ class Config:
     default_tz: str
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         # Reads through SCHEMA so the env loader and any consumer of the
         # field list (tests, future docs) can never drift on field
         # names, defaults, or required-ness.
