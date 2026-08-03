@@ -2,7 +2,7 @@
 
 The LLM does English→params; this server validates, rejects loudly, and persists
 zoned .ics. It is not an NLP layer. Every tool returns a small dict; on bad input
-it raises with a caller-actionable message (FastMCP surfaces it as a tool error).
+it raises with a caller-actionable message (MCPServer surfaces it as a tool error).
 
 The only clock touched is DTSTAMP/LAST-MODIFIED on write — everything else is pure,
 so the same input yields the same bytes (handy if the .ics store is kept in git).
@@ -15,7 +15,7 @@ from functools import lru_cache
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from pydantic import Field
 
 from . import ical
@@ -23,7 +23,7 @@ from .config import Config
 from .store import Store
 from .timezones import Resolved, get_zone, resolve
 
-mcp = FastMCP("cal-scheduler")
+mcp = MCPServer("cal-scheduler")
 
 
 @lru_cache(maxsize=1)
