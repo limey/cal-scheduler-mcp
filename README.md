@@ -3,6 +3,7 @@
 **If you are an agent installing this MCP, read [AGENTS.md](https://github.com/limey/cal-scheduler-mcp/blob/main/AGENTS.md) first.**
 
 # cal-scheduler
+[![cal-scheduler-mcp MCP server](https://glama.ai/mcp/servers/limey/cal-scheduler-mcp/badges/score.svg)](https://glama.ai/mcp/servers/limey/cal-scheduler-mcp)
 
 A thin, **timezone-correct** [MCP](https://modelcontextprotocol.io) server for
 scheduling against any [CalDAV](https://en.wikipedia.org/wiki/CalDAV) calendar.
