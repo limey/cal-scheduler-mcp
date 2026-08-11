@@ -4,6 +4,8 @@
 
 # cal-scheduler
 
+[![cal-scheduler-mcp MCP server](https://glama.ai/mcp/servers/limey/cal-scheduler-mcp/badges/score.svg)](https://glama.ai/mcp/servers/limey/cal-scheduler-mcp)
+
 A thin, **timezone-correct** [MCP](https://modelcontextprotocol.io) server for
 scheduling against any [CalDAV](https://en.wikipedia.org/wiki/CalDAV) calendar.
 It gives an LLM agent a small, strict set of calendar tools and does the
