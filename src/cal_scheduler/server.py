@@ -160,20 +160,30 @@ _MOVE_NEW_START_DESC = (
 
 @mcp.tool()
 def list_calendars() -> dict:
-    """List the calendars available on the account."""
+    """List the calendars available on the account.
+
+    Returns `{"calendars": [name, ...]}` with account calendar names sorted alphabetically.
+    """
     return {"calendars": _store().calendar_names()}
 
 
 @mcp.tool()
 def create_calendar(name: str) -> dict:
-    """Create a new calendar by display name."""
+    """Create a new calendar with the given display name.
+
+    Returns `{"ok": True, "created": name}`. The name must be unique; a duplicate name
+    raises an error.
+    """
     _store().create_calendar(name)
     return {"ok": True, "created": name}
 
 
 @mcp.tool()
 def delete_calendar(name: str) -> dict:
-    """Delete a calendar and all of its events. Irreversible."""
+    """Delete a calendar and all of its events. Irreversible.
+
+    Returns `{"ok": True, "deleted": name}`.
+    """
     _store().delete_calendar(name)
     return {"ok": True, "deleted": name}
 
