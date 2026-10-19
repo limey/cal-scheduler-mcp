@@ -4,8 +4,8 @@ requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform != 'win32'",
-    "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "python_full_version < '3.14' and sys_platform == 'win32'",
     "(python_full_version < '3.12' and sys_platform == 'emscripten') or (python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32')",
 ]
 
@@ -75,7 +75,7 @@ dev = [
 
 [[package]]
 name = "caldav"
-version = "3.4.0"
+version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dnspython" },
@@ -87,9 +87,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "recurring-ical-events" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ed/b4/3e2e62cd118e286f645d273abfe5badeb8370b11a55561426ee422350d67/caldav-3.4.0.tar.gz", hash = "sha256:a419eb93a307bdfcaa75649c9ef821a4fb6bbf36ce18973c7293ee0a90ba7fbe", size = 688781, upload-time = "2026-10-07T14:19:53.769Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/b0/d5064b07ee0d4316e6b0240a0e7e388cdfb306aeeea4ea898f9a768e57b1/caldav-3.5.0.tar.gz", hash = "sha256:9ce1a15ec48a3a6bad73c9bdd44073f01b5a499bd43fc2710b5181a291a75f61", size = 752507, upload-time = "2026-10-15T09:59:35.931Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/38/b01f256cd6470e53e871ba3ba6a1e8a6ccc66643e7ce267cd8df88fb1510/caldav-3.4.0-py3-none-any.whl", hash = "sha256:5a15e3d28644388cef2e873677a224ad9ed5e2df28ca3308fdc6bf6c7eb44d4e", size = 235865, upload-time = "2026-10-07T14:19:51.771Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/15/069f8c104df9b82113e32950edc6e2770b49a78ffdd04fe2c6522edcd7e5/caldav-3.5.0-py3-none-any.whl", hash = "sha256:413c7f81d7c4b13db98ef01f4bf29660de53f526af265b583ff6a59628432e52", size = 251997, upload-time = "2026-10-15T09:59:34.345Z" },
 ]
 
 [[package]]
@@ -404,15 +404,15 @@ wheels = [
 
 [[package]]
 name = "icalendar-searcher"
-version = "1.0.6"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "icalendar" },
     { name = "recurring-ical-events" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/65/255f6eb7589c3c98d1d739076c961d60ce70bbb55f7f406589f0245ddc6a/icalendar_searcher-1.0.6.tar.gz", hash = "sha256:2440d4d0d9fbe0021a6647916853744dbca179abd39d25c742ebb8442bbc1bc3", size = 71418, upload-time = "2026-05-29T07:53:29.849Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/07/9469134c7436ca2ad418b6359c7578b43616ee3b1cdd263190a6ffc44dd6/icalendar_searcher-1.2.0.tar.gz", hash = "sha256:14978379670385b837a580c2ee95665b18ae80169a0b7e12abfc503c049c57a9", size = 108783, upload-time = "2026-10-14T12:11:30.784Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/34/2248bb70ca2b4affa2e80623d3bae38a51b435254c3ce17dcff883a44a00/icalendar_searcher-1.0.6-py3-none-any.whl", hash = "sha256:649aad558df211bc50ca3dea3646e1b2f3e93f0995bca2b6358e9c79031471b6", size = 38251, upload-time = "2026-05-29T07:53:28.659Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/df/9ef13a5bb31bf620e37afa8657ec3f7172e0b9e51c935b9ead6900453def/icalendar_searcher-1.2.0-py3-none-any.whl", hash = "sha256:ae82b5189e9bf49530eb1d39981c1eee9984b9b3e37c1560949b1430d1f48763", size = 47962, upload-time = "2026-10-14T12:11:29.374Z" },
 ]
 
 [[package]]
