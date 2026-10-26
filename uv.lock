@@ -75,9 +75,10 @@ dev = [
 
 [[package]]
 name = "caldav"
-version = "3.5.0"
+version = "3.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "calendaring-config" },
     { name = "dnspython" },
     { name = "icalendar" },
     { name = "icalendar-searcher" },
@@ -87,9 +88,21 @@ dependencies = [
     { name = "pyyaml" },
     { name = "recurring-ical-events" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/96/b0/d5064b07ee0d4316e6b0240a0e7e388cdfb306aeeea4ea898f9a768e57b1/caldav-3.5.0.tar.gz", hash = "sha256:9ce1a15ec48a3a6bad73c9bdd44073f01b5a499bd43fc2710b5181a291a75f61", size = 752507, upload-time = "2026-10-15T09:59:35.931Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/ee/e2d82d0ddc9c5b0efad8dbb3c9f27bd392fd9f2261c93772e7a7bfaa30fa/caldav-3.6.0.tar.gz", hash = "sha256:f74deecf1b7f1a56ffc20a739f28d2c02e7ddbc40bb59bf9f65a3af58e8aef1d", size = 765150, upload-time = "2026-10-22T19:58:10.881Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/15/069f8c104df9b82113e32950edc6e2770b49a78ffdd04fe2c6522edcd7e5/caldav-3.5.0-py3-none-any.whl", hash = "sha256:413c7f81d7c4b13db98ef01f4bf29660de53f526af265b583ff6a59628432e52", size = 251997, upload-time = "2026-10-15T09:59:34.345Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/09/2a433c98919635dbd793ad74fe7921c2595624a269b2948a62348aa6342a/caldav-3.6.0-py3-none-any.whl", hash = "sha256:a16b433229c66ec4241acc67ca3f3774b8d93f1834c9bb5062d768dedbec6494", size = 259213, upload-time = "2026-10-22T19:58:09.173Z" },
+]
+
+[[package]]
+name = "calendaring-config"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7c/ce/bd49e6a64ade7fa09d872eea80601281b1b4167b737ceb0de2b16d29b329/calendaring_config-0.5.0.tar.gz", hash = "sha256:ed68ae96a5d9790cdf0ea6a933ddafd617523759a8a3fd273c63a4f3c3dcc41c", size = 37968, upload-time = "2026-10-22T14:44:50.337Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/17/3e4e04e3a344b2260139e64f53d34e95163e02b128b6066753540d5df524/calendaring_config-0.5.0-py3-none-any.whl", hash = "sha256:c5e1f6ffaf428a59b0e1373d951eb8e7fd9f49924912e65548cc2803e73a8646", size = 28571, upload-time = "2026-10-22T14:44:49.195Z" },
 ]
 
 [[package]]
